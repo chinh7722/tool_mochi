@@ -1,4 +1,4 @@
-"""Offline checks: Telegram roles classify users and never grant bot privileges."""
+"""Offline checks for shared operator actions and unsupported legacy commands."""
 
 import os
 import sys
@@ -37,7 +37,7 @@ def update(index, chat_id, text):
 
 
 class RolePolicyTests(unittest.TestCase):
-    def test_roles_remain_metadata_and_removing_access_removes_role(self):
+    def test_access_and_role_snapshot_update_independently(self):
         access = TelegramAccess((123, 456), roles={123: 'admin'})
         self.assertEqual((access.role(123), access.role(456), access.role(999)), ('admin', 'partner', None))
         self.assertTrue(access.allowed(123))
@@ -59,7 +59,7 @@ class RolePolicyTests(unittest.TestCase):
                     self.assertEqual(parse_control_command(command, 123, role, 7),
                         TelegramControlRequest(7, 123, 'stats', 123))
 
-    def test_no_role_can_parse_management_or_someone_elses_statistics(self):
+    def test_legacy_management_and_other_statistics_commands_are_rejected(self):
         commands = ('/stats 456', '/users', '/user_add 123 admin Self', '/user_revoke 456',
             '/stats 123 extra', '/users extra')
         for role in ('admin', 'partner'):
@@ -78,7 +78,7 @@ class RolePolicyTests(unittest.TestCase):
                 self.assertEqual(on_job.call_args.args[0], TelegramJobRequest(1, 123, 'ABC123', 1000))
                 self.assertEqual(on_control.call_args.args[0], TelegramControlRequest(2, 123, 'stats', 123))
 
-    def test_service_never_dispatches_management_for_either_role(self):
+    def test_service_rejects_legacy_management_commands_for_both_roles(self):
         commands = ('/users', '/user_add 123 admin Self', '/stats 456', '/user_revoke 456')
         for role in ('admin', 'partner'):
             with self.subTest(role=role):
@@ -90,7 +90,7 @@ class RolePolicyTests(unittest.TestCase):
                 on_control.assert_not_called()
                 self.assertFalse(bot.pending)
 
-    def test_help_never_advertises_bot_management_even_for_admin(self):
+    def test_help_omits_unsupported_legacy_management_commands(self):
         for role in ('admin', 'partner'):
             with self.subTest(role=role):
                 bot = TelegramBotService(None, TelegramAccess((123,), roles={123: role}), Mock())
@@ -170,7 +170,7 @@ class RoleGuiTests(unittest.TestCase):
         self.page._on_control_requested((FINGERPRINT, request))
         return request
 
-    def test_neither_role_can_forge_management_or_other_stats_requests(self):
+    def test_legacy_actions_and_other_stats_cannot_be_forged(self):
         actions = (('users', None, '', ''), ('stats', 789, '', ''),
             ('upsert', 999, 'New', 'admin'), ('revoke', 789, '', ''))
         for actor in (123, 456):
@@ -195,7 +195,7 @@ class RoleGuiTests(unittest.TestCase):
                     self.assertIn('Job thất bại: 1', text)
                     self.assertIn('Bean đã bán: 300', text)
 
-    def test_classification_does_not_change_job_creation_permissions(self):
+    def test_both_roles_keep_job_creation_permissions(self):
         with patch.object(MochiWorkerThread, 'start') as start:
             for index, actor in enumerate((123, 456), 101):
                 self.page._on_job_requested((FINGERPRINT, TelegramJobRequest(index, actor, 'REMOTE', 1000)))

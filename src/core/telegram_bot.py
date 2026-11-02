@@ -98,6 +98,7 @@ class TelegramControlRequest:
     job_id: str = ''
     gmailvip_api_key: str = field(default='', repr=False)
     one_trieu_api_key: str = field(default='', repr=False)
+    page: int = 1
 
 
 @dataclass(frozen=True)
@@ -115,9 +116,30 @@ class TelegramCustomerRequest:
 
 
 def parse_control_command(text, chat_id, role, update_id):
-    """Role is a classification label; it never grants bot management access."""
+    """Parse private commands; current ledger permissions are checked on dispatch."""
     parts = text.strip().split(maxsplit=3)
     command = parts[0].lower().split('@', 1)[0]
+    partner_commands = {'/partner_add':'partner_add','/partner_remove':'partner_remove',
+        '/partner_delete':'partner_remove','/partners':'partner_list',
+        '/partner':'partner_info','/partner_info':'partner_info'}
+    if command in partner_commands:
+        if role != 'admin':
+            raise ValueError('Chỉ admin đang được cấp quyền mới được quản lý partner.')
+        action = partner_commands[command]
+        if action == 'partner_list':
+            if len(parts)>2 or (len(parts)==2 and not re.fullmatch(r'[1-9][0-9]{0,5}',parts[1])):
+                raise ValueError('Cú pháp: /partners [SỐ_TRANG]. Ví dụ: /partners 2')
+            return TelegramControlRequest(update_id,chat_id,action,page=int(parts[1]) if len(parts)==2 else 1)
+        arguments = text.strip().split(maxsplit=2)
+        syntax = ('/partner_add CHAT_ID TÊN_PARTNER' if action=='partner_add' else
+            '/partner_remove CHAT_ID' if action=='partner_remove' else '/partner CHAT_ID')
+        if len(arguments)!=(3 if action=='partner_add' else 2) or not re.fullmatch(r'[1-9][0-9]{0,18}',arguments[1]):
+            raise ValueError('Cú pháp: '+syntax)
+        ids = parse_chat_ids(arguments[1])
+        name = arguments[2].strip() if action=='partner_add' else ''
+        if action=='partner_add' and (not name or len(name)>120):
+            raise ValueError('Tên partner phải có từ 1 đến 120 ký tự.')
+        return TelegramControlRequest(update_id,chat_id,action,ids[0],name)
     if command == '/mailapi':
         if len(parts) == 1:
             return TelegramControlRequest(update_id, chat_id, 'mail_keys_status')
@@ -144,7 +166,7 @@ def parse_control_command(text, chat_id, role, update_id):
         if target != chat_id:
             raise ValueError('Bạn chỉ được xem thống kê của chính mình qua bot.')
         return TelegramControlRequest(update_id, chat_id, 'stats', target)
-    raise ValueError('Quản lý người dùng được thực hiện trong tool; admin/partner chỉ dùng để phân loại.')
+    raise ValueError('Lệnh không hợp lệ. Admin dùng /partners, /partner, /partner_add hoặc /partner_remove.')
 
 
 def parse_job_command(text):
@@ -214,6 +236,11 @@ class TelegramApi:
 
 
 class TelegramBotService:
+    ADMIN_HELP = ('\nQuản lý partner (admin):\n'
+        '/partner_add CHAT_ID TÊN: thêm hoặc khôi phục partner.\n'
+        '/partner_remove CHAT_ID: xóa quyền partner, giữ lịch sử.\n'
+        '/partners [TRANG]: danh sách partner.\n'
+        '/partner CHAT_ID: thông tin và thống kê của partner.')
     HELP = ('Lệnh tạo job: /job MÃ_MỜI SỐ_KẸO [TÊN_KHÁCH]\n'
         '/mailapi KEY_GMAILVIP KEY_1TRIEUMAIL: lưu đủ 2 API mua mail riêng. /mailapi: xem trạng thái đã nhập.\n'
         'Ví dụ: /job VBRN5H 1000 Khách A\n'
@@ -232,11 +259,14 @@ class TelegramBotService:
         self.on_control = on_control
         self.on_customer = on_customer
 
-    def reply(self, chat_id, text, *, public=False):
+    def reply(self, chat_id, text, *, public=False, admin_only=False):
         if not public and not self.access.allowed(chat_id):
             return False
+        if admin_only and (not self.access.allowed(chat_id) or self.access.role(chat_id)!='admin'):
+            return False
         try:
-            self.outbox.put_nowait((chat_id, str(text)[:4000], public))
+            item=(chat_id, str(text)[:4000], public)
+            self.outbox.put_nowait(item+(True,) if admin_only else item)
             return True
         except asyncio.QueueFull:
             self.on_status('Hàng đợi phản hồi Telegram đầy; không gửi thêm phản hồi.')
@@ -315,8 +345,9 @@ class TelegramBotService:
             self.reply(chat_id, f'Chat ID {chat_id} chưa được cấp quyền. Gửi ID này cho quản trị viên.', public=True)
             return
         if base in ('/start', '/help'):
-            self.reply(chat_id, self.HELP)
-        elif base in ('/stats', '/users', '/user_add', '/user_revoke','/lich','/schedules','/huy','/cancel','/mailapi'):
+            self.reply(chat_id, self.HELP+(self.ADMIN_HELP if self.access.role(chat_id)=='admin' else ''))
+        elif base in ('/stats', '/users', '/user_add', '/user_revoke','/lich','/schedules','/huy','/cancel','/mailapi',
+                '/partner_add','/partner_remove','/partner_delete','/partners','/partner','/partner_info'):
             try:
                 request = parse_control_command(text, chat_id, self.access.role(chat_id), update_id)
             except ValueError as exc:
@@ -352,14 +383,18 @@ class TelegramBotService:
                 self.pending.discard(update_id)
                 self.reply(chat_id, 'Không chuyển được yêu cầu tạo job tới tool.')
         else:
-            self.reply(chat_id, self.HELP)
+            self.reply(chat_id, self.HELP+(self.ADMIN_HELP if self.access.role(chat_id)=='admin' else ''))
 
     async def _send_replies(self):
         while True:
-            chat_id, text, public = await self.outbox.get()
+            item = await self.outbox.get()
+            chat_id, text, public = item[:3]
+            admin_only = len(item)>3 and item[3]
             try:
                 for _ in range(3):
                     if not public and not self.access.allowed(chat_id):
+                        break
+                    if admin_only and (not self.access.allowed(chat_id) or self.access.role(chat_id)!='admin'):
                         break
                     try:
                         await self.api.call('sendMessage', {'chat_id': chat_id, 'text': text})

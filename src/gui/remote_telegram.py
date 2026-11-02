@@ -195,6 +195,7 @@ def build_telegram_page(window):
     bot_box.addWidget(_label('/id — lấy Chat ID   ·   /job MÃ_MỜI SỐ_BEAN [TÊN_KHÁCH] — tạo job   ·   /stats — thống kê cá nhân\n'
         '/mailapi KEY_GMAILVIP KEY_1TRIEUMAIL — lưu đủ 2 API riêng; /mailapi — xem trạng thái\n'
         '/hen MÃ_MỜI SỐ_BEAN DD/MM/YYYY HH:MM — hẹn giờ Việt Nam · /lich — xem lịch · /huy MÃ_JOB — hủy job chưa chạy\n'
+        'Admin: /partner_add CHAT_ID TÊN · /partner_remove CHAT_ID · /partners [TRANG] · /partner CHAT_ID\n'
         'Bot và job tiếp tục chạy trên VPS khi đóng ứng dụng quản lý. Job dùng cấu hình trong Cài đặt chung.',muted=True,size=11))
     body.addWidget(bot)
 
@@ -291,7 +292,7 @@ def build_telegram_page(window):
     w.user_name=QLineEdit(); w.user_name.setPlaceholderText('Tên người dùng / đối tác')
     w.user_name.setMaxLength(120)
     w.user_role=QComboBox(); w.user_role.addItems(['partner','admin'])
-    w.user_role.setToolTip('Nhãn phân loại, không thay đổi quyền trên bot.')
+    w.user_role.setToolTip('Admin được thêm, xóa và xem thông tin partner qua bot. Partner chỉ quản lý job của mình.')
     for col,(caption,field) in enumerate((('Chat ID',w.user_id),('Tên người dùng',w.user_name),('Vai trò',w.user_role))):
         fields.addWidget(_label(caption),0,col)
         fields.addWidget(field,1,col)

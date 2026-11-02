@@ -1,5 +1,9 @@
 # hoshino-tool — Mochi Chat, Proxy Pool & Telegram
 
+> **[Admin quản lý partner trên bot](QUAN_LY_PARTNER_BOT_2026-11-03.md):** dùng
+> `/partner_add CHAT_ID TÊN`, `/partner_remove CHAT_ID`, `/partners [TRANG]` và
+> `/partner CHAT_ID` trong chat riêng. Xóa quyền vẫn giữ lịch sử job và tài chính.
+
 > **[Nhập mã mời combo](COMBO_MA_MOI_2026-11-03.md):** nhập tổng bean, bật Combo
 > hoặc nhắn `/combo MÃ_MỜI SỐ_BEAN`. Đạt giới hạn ngày thì lưu cùng job và tự chạy
 > tiếp sau 24 giờ 1 phút đến đủ mục tiêu; giữ tiến độ/lịch khi VPS khởi động lại.
@@ -54,7 +58,7 @@
 
 > Thêm logo, icon và ảnh nền tại **[`gui/assets/branding/`](gui/assets/branding/README.md)**, hoặc bấm **Mở thư mục hình ảnh** ở cuối thanh bên. Không cần sửa code hay chép ảnh sang `src/`. Xem [hướng dẫn giao diện và tài nguyên](GIAO_DIEN_HOSHINO_2026-11-01.md).
 
-> Telegram có [quản lý tên, vai trò admin/partner và thống kê theo Chat ID](QUAN_LY_TELEGRAM_2026-11-01.md): tổng job hoàn thành, job thất bại và bean thực tế đã chạy. Dữ liệu lưu SQLite, không cộng trùng kết quả; thu hồi quyền vẫn giữ lịch sử. Vai trò chỉ dùng phân loại: mọi Chat ID được cấp quyền đều tạo job và xem số liệu của mình; quản lý người dùng thực hiện trong tool.
+> Telegram có [quản lý tên, vai trò admin/partner và thống kê theo Chat ID](QUAN_LY_TELEGRAM_2026-11-01.md): tổng job hoàn thành, job thất bại và bean thực tế đã chạy. Dữ liệu lưu SQLite, không cộng trùng kết quả; thu hồi quyền vẫn giữ lịch sử. Mọi Chat ID được cấp quyền đều tạo job và xem số liệu của mình; admin có thêm quyền quản lý partner qua bot. Quản lý tài khoản admin thực hiện trong ứng dụng quản lý.
 
 > Có [tab Telegram để thêm job theo Chat ID](TELEGRAM_2026-11-01.md): nhập Bot Token, thêm ID được phép và bật bot. Người dùng nhắn riêng `/id` để lấy ID; sau khi được cấp quyền có thể gửi `/job MÃ_MỜI SỐ_KẸO`, ví dụ `/job VBRN5H 1000`. Job dùng cấu hình hiện tại trong tool và bot báo kết quả về đúng người gửi.
 

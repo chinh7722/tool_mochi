@@ -142,6 +142,16 @@ class TelegramUserStore(CustomerAccountsMixin):
             FROM mail_purchases p JOIN jobs owner ON owner.job_id=p.job_id
             GROUP BY owner.chat_id) e ON e.chat_id=u.chat_id'''
 
+    # Customer orders need an inactive users row for their job FK. Such rows
+    # become partners only when explicitly enrolled or used as an operator.
+    _PARTNER_FILTER = '''u.chat_id>0 AND u.role='partner' AND (
+        u.active=1 OR NOT EXISTS(SELECT 1 FROM customer_orders c WHERE c.chat_id=u.chat_id)
+        OR EXISTS(SELECT 1 FROM jobs operator_job LEFT JOIN customer_orders customer_job
+            ON customer_job.job_id=operator_job.job_id
+            WHERE operator_job.chat_id=u.chat_id AND customer_job.job_id IS NULL)
+        OR EXISTS(SELECT 1 FROM metadata member
+            WHERE member.key='bot_partner:' || u.chat_id))'''
+
     def __init__(self, path):
         if str(path) == ':memory:':
             raise ValueError('Cần đường dẫn file để lưu thống kê Telegram bền vững.')
@@ -286,6 +296,9 @@ class TelegramUserStore(CustomerAccountsMixin):
                 ON CONFLICT(chat_id) DO UPDATE SET name=excluded.name, role=excluded.role,
                     active=excluded.active, updated_at=excluded.updated_at''',
                 (chat_id, name, role, int(active), stamp, stamp))
+            if role == 'partner':
+                connection.execute('INSERT OR IGNORE INTO metadata(key,value) VALUES (?,?)',
+                    (f'bot_partner:{chat_id}',stamp))
         return self.get_user(chat_id)
 
     def set_active(self, chat_id, active):
@@ -293,8 +306,73 @@ class TelegramUserStore(CustomerAccountsMixin):
         if type(active) is not bool:
             raise ValueError('Trạng thái người dùng phải là true hoặc false.')
         with self._connection(write=True) as connection:
-            return bool(connection.execute('UPDATE users SET active=?, updated_at=? WHERE chat_id=?',
-                (int(active), _now(), chat_id)).rowcount)
+            stamp = _now()
+            changed = bool(connection.execute('UPDATE users SET active=?, updated_at=? WHERE chat_id=?',
+                (int(active), stamp, chat_id)).rowcount)
+            connection.execute('''INSERT OR IGNORE INTO metadata(key,value)
+                SELECT ?,? FROM users WHERE chat_id=? AND role='partner' ''',
+                (f'bot_partner:{chat_id}',stamp,chat_id))
+            return changed
+
+    @staticmethod
+    def _require_active_admin(connection, actor_id):
+        actor = connection.execute('SELECT role,active FROM users WHERE chat_id=?',
+            (_chat_id(actor_id),)).fetchone()
+        if actor is None or actor['role'] != 'admin' or not actor['active']:
+            raise PermissionError('Chỉ admin đang được cấp quyền mới được quản lý partner qua bot.')
+
+    def _admin_partner(self, connection, target_id):
+        result = self._user(connection.execute(self._USER_SELECT + ' WHERE u.chat_id=? AND '
+            + self._PARTNER_FILTER + ' GROUP BY u.chat_id', (target_id,)).fetchone())
+        if result is None:
+            raise ValueError('Không tìm thấy partner với Chat ID này.')
+        return result
+
+    def admin_upsert_partner(self, actor_id, target_id, name):
+        """Enroll/restore a partner without changing an admin or financial history."""
+        actor_id, target_id = _chat_id(actor_id), _chat_id(target_id)
+        name = _text(name, 'Tên partner', 120)
+        with self._connection(write=True) as connection:
+            self._require_active_admin(connection, actor_id)
+            old = connection.execute('SELECT role FROM users WHERE chat_id=?', (target_id,)).fetchone()
+            if target_id == actor_id or (old is not None and old['role'] != 'partner'):
+                raise PermissionError('Bot chỉ quản lý partner; không được thay đổi tài khoản admin.')
+            stamp = _now()
+            connection.execute('''INSERT INTO users(chat_id,name,role,active,created_at,updated_at)
+                VALUES (?,?,'partner',1,?,?) ON CONFLICT(chat_id) DO UPDATE SET
+                name=excluded.name,active=1,updated_at=excluded.updated_at''',
+                (target_id,name,stamp,stamp))
+            connection.execute('INSERT OR IGNORE INTO metadata(key,value) VALUES (?,?)',
+                (f'bot_partner:{target_id}',stamp))
+            return self._admin_partner(connection, target_id)
+
+    def admin_revoke_partner(self, actor_id, target_id):
+        """Revoke access while preserving the partner's jobs, keys and statistics."""
+        actor_id, target_id = _chat_id(actor_id), _chat_id(target_id)
+        with self._connection(write=True) as connection:
+            self._require_active_admin(connection, actor_id)
+            self._admin_partner(connection, target_id)
+            stamp = _now()
+            changed = bool(connection.execute('''UPDATE users SET active=0,updated_at=?
+                WHERE chat_id=? AND role='partner' AND active=1''', (stamp,target_id)).rowcount)
+            connection.execute('INSERT OR IGNORE INTO metadata(key,value) VALUES (?,?)',
+                (f'bot_partner:{target_id}',stamp))
+            return changed
+
+    def admin_list_partners(self, actor_id):
+        """Read authorization and partner statistics in the same short transaction."""
+        actor_id = _chat_id(actor_id)
+        with self._connection(write=True) as connection:
+            self._require_active_admin(connection, actor_id)
+            return tuple(self._user(row) for row in connection.execute(self._USER_SELECT +
+                ' WHERE ' + self._PARTNER_FILTER +
+                ' GROUP BY u.chat_id ORDER BY u.active DESC,u.name COLLATE NOCASE,u.chat_id'))
+
+    def admin_get_partner(self, actor_id, target_id):
+        actor_id, target_id = _chat_id(actor_id), _chat_id(target_id)
+        with self._connection(write=True) as connection:
+            self._require_active_admin(connection, actor_id)
+            return self._admin_partner(connection, target_id)
 
     def migrate_legacy(self, ids):
         """Import the old allowlist once, without changing existing users or history."""

@@ -41,7 +41,7 @@ class TelegramBotThread(QThread):
             except RuntimeError:
                 pass
 
-    def reply(self, chat_id, text, request_id=None, *, public=False):
+    def reply(self, chat_id, text, request_id=None, *, public=False, admin_only=False):
         if not self._loop or not self._service or self._stop.is_set():
             return False
 
@@ -52,7 +52,7 @@ class TelegramBotThread(QThread):
                 return
             if request_id is not None:
                 service.complete(request_id)
-            service.reply(chat_id, text, public=public)
+            service.reply(chat_id, text, public=public, admin_only=admin_only)
 
         try:
             self._loop.call_soon_threadsafe(deliver)

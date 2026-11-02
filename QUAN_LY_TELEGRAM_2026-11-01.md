@@ -11,25 +11,58 @@ Tab Telegram có bảng người dùng gồm **Chat ID, tên, vai trò, job hoà
 
 Người thao tác trực tiếp trên tool vẫn có quyền quản lý toàn bộ bảng. Không tự đặt người đầu tiên trong danh sách thành admin; quản trị viên chọn vai trò trong giao diện.
 
-## Vai trò phân loại và quyền qua bot
+## Vai trò và quyền qua bot — cập nhật 03/11/2026
 
-Theo lựa chọn của người dùng, `admin` và `partner` **chỉ là nhãn phân loại**, không cấp quyền quản trị qua bot. Việc cho phép/thu hồi truy cập vẫn dựa vào Chat ID và trạng thái được cấp quyền trong tool.
+Admin đang được cấp quyền có thể quản lý partner ngay trong chat riêng với bot.
+Trước tiên, chọn đúng Chat ID trong ứng dụng quản lý Windows, đặt vai trò
+**admin** và bảo đảm tài khoản đang được cấp quyền. Không tự cấp admin cho ID
+đầu tiên hoặc cho người gửi lệnh. VPS và bot cần đang chạy để nhận yêu cầu.
 
 | Chức năng | partner | admin |
 |---|---|---|
 | Tạo job bằng `/job` | Có | Có |
 | Xem số liệu của mình bằng `/stats` | Có | Có |
-| Xem thống kê của người khác | Không | Không |
-| Quản lý danh sách/tên/vai trò qua bot | Không | Không |
+| Thêm/khôi phục partner bằng `/partner_add CHAT_ID TÊN` | Không | Có |
+| Xóa quyền partner bằng `/partner_remove CHAT_ID` | Không | Có |
+| Xem danh sách bằng `/partners [TRANG]` | Không | Có |
+| Xem thông tin partner bằng `/partner CHAT_ID` | Không | Có |
+| Thêm, đổi vai trò hoặc xóa tài khoản admin qua bot | Không | Không |
 
 Ví dụ:
 
 ```text
 /stats
 /job VBRN5H 1000 Khách A
+/partner_add 123456789 Partner A
+/partners
+/partner 123456789
+/partner_remove 123456789
 ```
 
-Mọi thao tác quản lý người dùng thực hiện trực tiếp trong tool. Bot từ chối `/users`, `/user_add`, `/user_revoke` và yêu cầu xem thống kê của người khác ở cả hai vai trò. Đổi nhãn admin/partner không chặn lệnh, job hoặc phản hồi đang chờ của một Chat ID vẫn được cấp quyền. Có thể nhập admin/partner vào ô tìm kiếm để lọc bảng mà không thay đổi quyền.
+`/partner_add` thêm partner mới hoặc khôi phục và cập nhật tên partner đã xóa
+quyền. `/partner_remove` thu hồi quyền truy cập, giữ lại job, bean, lịch sử tài
+chính và API riêng. Thêm lại cùng ID sẽ giữ các dữ liệu này. Partner mới vẫn
+cần dùng `/mailapi` để lưu đủ hai API mua mail riêng trước khi tạo job.
+
+`/partners` hiển thị **10 partner mỗi trang**, gồm cả tài khoản đã xóa quyền
+với trạng thái tương ứng. Dùng `/partners 2` để xem trang tiếp. Danh sách không
+đưa admin, Local hoặc các bản ghi giữ chỗ của đơn khách hàng vào danh sách partner.
+`/partner CHAT_ID` hiển thị tên, ID, quyền truy cập, job hoàn thành/thất bại,
+bean thực tế và bean yêu cầu, doanh thu, chi phí mail và lợi nhuận. Khi còn dữ
+liệu chưa đối soát, thông tin tài chính sẽ ghi rõ. Bot không hiển thị API key,
+token hoặc mật khẩu trong các kết quả này.
+
+Quyền admin được kiểm tra lại từ dữ liệu đã lưu khi thực thi từng lệnh, kể cả
+khi quyền đã thay đổi sau lúc bot nhận yêu cầu. Admin chỉ quản lý partner;
+không thể tự nâng quyền, đổi/xóa admin khác hoặc sửa tài khoản Local bằng bot.
+Phản hồi chứa thông tin partner đang chờ gửi cũng bị chặn nếu người nhận đã
+mất quyền admin. Partner vẫn dùng `/stats` để xem số liệu của mình và không
+được xem thông tin partner khác. `/stats CHAT_ID_KHÁC` và các lệnh cũ `/users`,
+`/user_add`, `/user_revoke` không thay thế các lệnh quản lý partner mới.
+
+Ứng dụng quản lý vẫn cho phép quản lý toàn bộ người dùng. Ô tìm kiếm theo
+admin/partner chỉ lọc bảng, không thay đổi quyền. Xem thêm
+[hướng dẫn quản lý partner trên bot](QUAN_LY_PARTNER_BOT_2026-11-03.md).
 
 ## Thông báo nguyên nhân thất bại
 
@@ -66,7 +99,7 @@ Job đang chạy vẫn được cập nhật vào dữ liệu khi bot tắt ho�
 
 ## Kiểm chứng
 
-Các kiểm tra mới:
+Các kiểm tra nền về Telegram và thống kê:
 
 ```powershell
 py -3.14 -I tests/test_telegram_users.py
@@ -74,6 +107,14 @@ py -3.14 -I tests/test_telegram_user_ui.py
 py -3.14 -I tests/test_telegram_roles.py
 ```
 
-46 kiểm tra chuyên biệt qua: 15 SQLite/lưu trữ, 15 GUI/thống kê và 16 vai trò phân loại/quyền truy cập. Sau xác nhận vai trò chỉ để phân loại, đã chạy lại 74 kiểm tra Telegram liên quan, gồm 28 kiểm tra bot cũ. Các bộ Chrome/Qt, đồng thời proxy và mua mail theo lô cũng đã qua ở vòng tích hợp. Đã xem trước giao diện bằng dữ liệu giả, không dùng số liệu/người dùng thật.
+Phần quản lý partner mới có **33 kiểm thử qua**: 13 kiểm thử lưu trữ và 20
+kiểm thử bot/quyền/GUI. Bao phủ thêm, xóa quyền, khôi phục, giữ lịch sử và API,
+phân trang, thông tin partner, kiểm tra lại quyền admin trong SQLite và chặn
+phản hồi nhạy cảm sau khi hạ quyền. Các kiểm thử dùng dữ liệu tạm và bot giả.
+
+```powershell
+.venv/Scripts/python.exe -I tests/test_partner_management.py
+.venv/Scripts/python.exe -I tests/test_partner_bot.py
+```
 
 Nguồn chỉnh ở gốc và `src/` được đồng bộ. Không gửi tin Telegram thật, không mua mail, đăng nhập Google hoặc nhập mã thật trong kiểm chứng. Mở lại `Launch_MochiTool.bat` để dùng bản nguồn mới; chưa đóng gói lại EXE.

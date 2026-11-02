@@ -212,6 +212,7 @@ class TelegramPage(QWidget):
             '/combo MÃ_MỜI SỐ_BEAN [TÊN_KHÁCH] — tự tiếp tục sau 24 giờ 1 phút khi đạt giới hạn ngày\n'
             '/mailapi KEY_GMAILVIP KEY_1TRIEUMAIL — lưu đủ 2 API riêng cho admin/partner; /mailapi — xem trạng thái\n'
             '/hen MÃ_MỜI SỐ_BEAN DD/MM/YYYY HH:MM — hẹn giờ Việt Nam · /lich — xem lịch · /huy MÃ_JOB — hủy job chưa chạy\n'
+            'Admin: /partner_add CHAT_ID TÊN · /partner_remove CHAT_ID · /partners [TRANG] · /partner CHAT_ID\n'
             'Ví dụ: /job VBRN5H 1000 Khách A. Bot chỉ nhận chat riêng khi tool đang mở; '
             'lệnh tồn lúc bot tắt được bỏ qua. Job dùng cấu hình trong Cài đặt chung.', bot_card)
         help_text.setWordWrap(True)
@@ -357,7 +358,7 @@ class TelegramPage(QWidget):
         self.combo_role = QComboBox(users_card)
         self.combo_role.addItem('partner', 'partner')
         self.combo_role.addItem('admin', 'admin')
-        self.combo_role.setToolTip('Nhãn phân loại người dùng; không thay đổi quyền trên bot.')
+        self.combo_role.setToolTip('Admin được quản lý partner qua bot. Partner tạo job và xem thống kê của mình.')
         for column, (label, field) in enumerate((('Chat ID', self.input_chat_id),
                 ('Tên người dùng', self.input_name), ('Vai trò', self.combo_role))):
             fields.addWidget(QLabel(label, users_card), 0, column)
@@ -665,11 +666,11 @@ class TelegramPage(QWidget):
 
     def _sync_access(self):
         ids, roles = self.store.active_ids(), self.store.roles()
-        self.store.sync_customer_profiles()
-        self.customer_page.refresh()
-        self.settings.setValue('telegram/allowed_chat_ids', '\n'.join(map(str, ids)))
         if self.worker is not None:
             self.worker.access.replace(ids, roles=roles)
+        self.settings.setValue('telegram/allowed_chat_ids', '\n'.join(map(str, ids)))
+        self.store.sync_customer_profiles()
+        self.customer_page.refresh()
 
     def _render_users(self, *_ , select_chat_id=None):
         selected = select_chat_id
@@ -1314,6 +1315,9 @@ class TelegramPage(QWidget):
                 or not worker.access.allowed(request.chat_id)):
             worker.complete_request(request.update_id)
             return
+        if request.action in ('partner_add','partner_remove','partner_list','partner_info'):
+            self._on_partner_control(worker,request,actor)
+            return
         if request.action in ('mail_keys_status','mail_keys_save'):
             try:
                 if request.action=='mail_keys_save':
@@ -1345,6 +1349,61 @@ class TelegramPage(QWidget):
         except Exception:
             text = 'Không đọc được thống kê. Nhờ quản trị viên kiểm tra dữ liệu trong tool.'
         worker.reply(request.chat_id, text, request.update_id)
+
+    def _on_partner_control(self, worker, request, actor):
+        if actor.role != 'admin':
+            worker.reply(request.chat_id,'Chỉ admin đang được cấp quyền mới được quản lý partner.',request.update_id)
+            return
+        changed = False
+        try:
+            if request.action == 'partner_add':
+                if request.role not in ('','partner'):
+                    raise ValueError('Bot chỉ được thêm partner; quản lý tài khoản admin trong ứng dụng quản lý.')
+                partner = self.store.admin_upsert_partner(actor.chat_id,request.target_chat_id,request.name)
+                changed = True
+                text = (f'Đã thêm/khôi phục partner {partner.name} — {partner.chat_id}.\n'
+                    f'Xem thông tin: /partner {partner.chat_id}\n'
+                    'Partner dùng /mailapi để nhập đủ 2 API mua mail riêng trước khi tạo job.')
+            elif request.action == 'partner_remove':
+                removed = self.store.admin_revoke_partner(actor.chat_id,request.target_chat_id)
+                changed = True
+                text = (f'Đã xóa quyền partner {request.target_chat_id}.' if removed else
+                    f'Partner {request.target_chat_id} đã bị xóa quyền trước đó.')
+                text += '\nGiữ lịch sử job, bean và tài chính. Thêm lại bằng /partner_add CHAT_ID TÊN.'
+            elif request.action == 'partner_list':
+                if type(request.page) is not int or not 1 <= request.page <= 999999:
+                    raise ValueError('Số trang danh sách partner không hợp lệ.')
+                partners = self.store.admin_list_partners(actor.chat_id)
+                pages = max(1,(len(partners)+9)//10)
+                if request.page>pages:
+                    raise ValueError(f'Danh sách chỉ có {pages} trang. Dùng /partners {pages}.')
+                active = sum(partner.active for partner in partners)
+                lines = [f'Danh sách partner · Trang {request.page}/{pages}',
+                    f'Tổng: {len(partners)} · Được cấp quyền: {active} · Đã xóa quyền: {len(partners)-active}']
+                for partner in partners[(request.page-1)*10:request.page*10]:
+                    name = ' '.join(partner.name.split())[:60]
+                    lines.append(f'{partner.chat_id} · {name} · '+('Được phép' if partner.active else 'Đã xóa quyền'))
+                if not partners:
+                    lines.append('Chưa có partner. Thêm bằng /partner_add CHAT_ID TÊN.')
+                lines.append('Xem thông tin: /partner CHAT_ID')
+                if request.page<pages:
+                    lines.append(f'Trang tiếp: /partners {request.page+1}')
+                text = '\n'.join(lines)
+            else:
+                partner = self.store.admin_get_partner(actor.chat_id,request.target_chat_id)
+                text = 'Thông tin partner\n'+self._user_stats_text(partner)+f'\nBean yêu cầu: {partner.requested_beans:,}'
+        except (ValueError,PermissionError) as exc:
+            text = str(exc)
+        except Exception:
+            text = 'Không đọc/ghi được dữ liệu partner. Nhờ quản trị viên kiểm tra dữ liệu trên VPS.'
+        if changed:
+            try:
+                self._sync_access()
+                self._render_users(select_chat_id=request.target_chat_id)
+                self.settings.sync()
+            except Exception:
+                text += '\nThay đổi đã lưu; chưa cập nhật đủ bảng quản lý. Bấm làm mới trong ứng dụng quản lý.'
+        worker.reply(request.chat_id,text,request.update_id,admin_only=True)
 
     def _job_mail_keys(self, job_id):
         job=self.store.get_job(job_id)

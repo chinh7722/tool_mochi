@@ -609,3 +609,28 @@ Quy trình phát triển và hoàn thiện công cụ trải qua 8 vòng lặp (
   Rollout chỉ thực hiện khi active/queued bằng0, sao lưu dữ liệu trước khi pull
   và giữ trạng thái bot/SePay trước cập nhật.
 
+### Admin quản lý partner qua bot — 03/11/2026
+
+- Yêu cầu mới thay chính sách nhãn phân loại cũ: admin đang active được quản lý
+  partner trong chat riêng. Lệnh `/partner_add CHAT_ID TÊN`, `/partner_remove CHAT_ID`,
+  `/partners [TRANG]`, `/partner CHAT_ID`; `/help` của admin có nhóm lệnh này.
+  Thêm/cập nhật/khôi phục chỉ role partner; tài khoản admin và Local được bảo vệ.
+- `TelegramUserStore.admin_*_partner` kiểm tra lại active/role trong cùng
+  BEGIN IMMEDIATE với thao tác. List/info dùng thống kê hiện có, không lộ API,
+  token hoặc mật khẩu. Danh sách 10 người/trang, có trạng thái đã xóa quyền.
+- Xóa là active=0, giữ jobs, mail keys, doanh thu, chi phí và ví/đơn cũ. Thêm lại
+  đúng Chat ID giữ lịch sử. Marker metadata `bot_partner:CHAT_ID` ghi người được
+  thêm rõ ràng qua bot/desktop. Loại bản ghi users tạm do customer_orders tạo
+  khỏi danh sách partner; chuyển khách thành partner vẫn bảo toàn ví và đơn.
+- Sau thay đổi, `_sync_access` cập nhật cache quyền bot trước khi refresh bảng
+  khách; UI và INI cùng nhận danh sách mới. Khi xử lý callback vẫn kiểm tra SQL,
+  nên role cache cũ không cho admin đã bị hạ quyền thực hiện quản lý.
+- Reply `admin_only=True` đi qua cầu nối Qt, kiểm tra active/role khi xếp hàng
+  và trước mỗi lần gửi/thử lại. Hạ admin thành partner chặn thông tin partner
+  đang chờ gửi; kết quả/thống kê cá nhân bình thường vẫn hoạt động.
+- Thêm test_partner_management13 và test_partner_bot20: quyền/race SQLite,
+  private chat, phân trang, dữ liệu nhạy cảm, giữ lịch sử/API, retry sau hạ quyền.
+  Full Windows839 và Ubuntu839 ca PASS. Root/src đồng bộ, cập nhật hướng dẫn tại
+  `QUAN_LY_PARTNER_BOT_2026-11-03.md` và sửa phần quyền trong tài liệu Telegram cũ.
+  Không thêm/xóa người dùng hoặc gửi tin Telegram thật trong kiểm chứng.
+
