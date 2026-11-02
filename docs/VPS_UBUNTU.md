@@ -41,6 +41,13 @@ chạy job, bot hoặc cơ sở dữ liệu vận hành trên máy tính.
 trên VPS; đơn giá thực tế được chốt khi tạo job. **Lưu nháp** giữ các trường job
 trên máy tính, không tạo job. Polling trạng thái không ghi đè cấu hình đang nhập.
 
+Trong **Job đang chạy**, các job đang xử lý/chờ được đưa lên trước, rồi tới job
+đã kết thúc; mỗi nhóm xếp job mới nhất ở đầu. Tạo job từ máy tính sẽ tự mở danh
+sách và chọn đúng job vừa tạo. Job từ bot tự xuất hiện qua polling, kể cả job
+kết thúc trước lần cập nhật đầu tiên. Dùng **Đồng bộ VPS** để làm mới ngay;
+nhãn cạnh nút cho biết tổng job và giờ đồng bộ gần nhất. Nếu mất kết nối, bảng
+giữ dữ liệu cũ và báo rõ chưa đồng bộ. Di chuột vào ô job để xem mã job đầy đủ.
+
 VPS hiện dùng SSH `root1@sv50.pcrender.net`, cổng `20052`. Launcher không chứa
 mật khẩu SSH. Nếu triển khai đã tạo `data/remote_connection.json`, ứng dụng tự đọc
 URL/token từ file này; file nằm ngoài Git. Có thể xóa file để nhập token mỗi phiên.

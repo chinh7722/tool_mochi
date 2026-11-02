@@ -14,6 +14,21 @@ from gui.branding import BrandSidebar, WORKSPACE_STYLE, icon
 from core.remote.client import RemoteClient
 from core.remote.protocol import RemoteError
 
+TERMINAL_JOB_STATUSES={'Hoàn thành','Thất bại','Đã hủy','Mã không hợp lệ','Mã mời lỗi',
+    'Đạt giới hạn 24h','completed','failed','cancelled','invalid_code','invite_limit_reached'}
+
+
+def ordered_jobs(records):
+    """Keep current work visible and show the newest jobs above older results."""
+    def key(pair):
+        index,record=pair
+        try:
+            stamp=datetime.fromisoformat(str(record.get('created_at',''))).timestamp()
+        except (ValueError,TypeError,OverflowError):
+            stamp=0
+        return (record.get('status') not in TERMINAL_JOB_STATUSES,stamp,index)
+    return [record for _,record in sorted(enumerate(records),key=key,reverse=True)]
+
 
 class RequestWorker(QThread):
     result = Signal(object)
@@ -150,7 +165,26 @@ class RemoteMainWindow(QMainWindow):
         self._polling = True
         worker = self.task(self.client.state,self.render)
         worker.error.connect(self.connection_lost)
-        worker.finished.connect(lambda:setattr(self,'_polling',False))
+        worker.finished.connect(self._poll_finished)
+
+    def _poll_finished(self):
+        self._polling=False
+        if self._refresh_requested and not self._closing:
+            self._refresh_requested=False
+            QTimer.singleShot(0,self.refresh_jobs)
+
+    def refresh_jobs(self,*_):
+        if self._closing:
+            return
+        if self.client is None:
+            self.status.setText('Kết nối VPS tại Cài đặt chung để đồng bộ danh sách job.')
+            self.open_connection_settings()
+            return
+        if self._polling or self._mutating:
+            self._refresh_requested=True
+            return
+        self._refresh_requested=False
+        self.poll()
 
     def send(self,action,payload=None,callback=None):
         if self.client is None or not self._connected or self._mutating or self._closing or self.snapshot.get('closing',False):
@@ -168,7 +202,7 @@ class RemoteMainWindow(QMainWindow):
         def done():
             self._mutating = False
             self.enable_actions(self._connected)
-            self.poll()
+            self.refresh_jobs()
         worker.finished.connect(done)
 
     def command_unconfirmed(self,message):
@@ -181,6 +215,7 @@ class RemoteMainWindow(QMainWindow):
         self.enable_actions(False)
         self.btn_connection.setText('○  Mất kết nối VPS')
         self.btn_connection.setStyleSheet('text-align:left;background:transparent;border:none;color:#fbbf24;padding:8px 5px;font-size:11px;')
+        self.job_sync_status.setText('Chưa đồng bộ được VPS · Đang giữ kết quả lần cập nhật trước.')
 
     def build_dashboard(self):
         from gui.remote_workspace import build_dashboard
@@ -196,7 +231,18 @@ class RemoteMainWindow(QMainWindow):
             customer=self.job_customer.text(),batch=self.job_batch.currentData() or '')
         if self.schedule.isChecked():
             payload['scheduled_at'] = self.schedule_time.dateTime().toString('yyyy-MM-ddTHH:mm:ss')+'+07:00'
-        self.send('job.create',payload)
+        self.send('job.create',payload,self.job_created)
+
+    def job_created(self,result):
+        job_id=result.get('job_id')
+        if not isinstance(job_id,str) or not job_id:
+            return
+        self._pending_focus_job_id=job_id
+        self.activate(1)
+        self.workspace_tabs.setCurrentIndex(0)
+        self.mochi_tabs.setCurrentIndex(1)
+        self.job_sync_status.setText('Đã tạo '+job_id+' · Đang cập nhật từ VPS…')
+        self.refresh_jobs()
 
     def selected_send(self,widget,key,action,extra=None):
         value = self.selected(widget,key)
@@ -489,6 +535,8 @@ class RemoteMainWindow(QMainWindow):
         recent=list(reversed(display))[:10]
         fill(self.dashboard_jobs,recent,['customer_display','invite_code','progress','beans_actual','status','time_display'],identity_key='job_id')
         self.dashboard_empty.setVisible(not recent)
+        at_top=self.jobs.verticalScrollBar().value()<=1
+        display=ordered_jobs(display)
         for old_row in range(self.jobs.rowCount()):
             cell=self.jobs.cellWidget(old_row,7)
             if cell is not None:
@@ -496,8 +544,12 @@ class RemoteMainWindow(QMainWindow):
                 self.jobs.removeCellWidget(old_row,7)
         fill(self.jobs,display,['customer_display','creator_name','invite_code','progress','beans','status','time_display','actions'],identity_key='job_id')
         self._job_row_buttons=[]
-        terminal={'Hoàn thành','Thất bại','Đã hủy','Mã không hợp lệ','Mã mời lỗi','Đạt giới hạn 24h'}
+        terminal=TERMINAL_JOB_STATUSES
         for row,record in enumerate(display):
+            for column in range(7):
+                item=self.jobs.item(row,column)
+                item.setData(Qt.ItemDataRole.UserRole,record['job_id'])
+                item.setToolTip('Mã job: '+record['job_id']+'\n'+item.text())
             actions=QWidget()
             actions.setStyleSheet('background:transparent;')
             layout=QHBoxLayout(actions)
@@ -512,6 +564,24 @@ class RemoteMainWindow(QMainWindow):
                 self._job_row_buttons.append((button,allowed))
                 layout.addWidget(button)
             self.jobs.setCellWidget(row,7,actions)
+        focused=False
+        if self._pending_focus_job_id:
+            for row,record in enumerate(display):
+                if record['job_id']==self._pending_focus_job_id:
+                    self.jobs.selectRow(row)
+                    self.jobs.scrollToItem(self.jobs.item(row,0))
+                    self._pending_focus_job_id=None
+                    focused=True
+                    break
+        if at_top and not focused:
+            self.jobs.scrollToTop()
+        updated=datetime.now().strftime('%H:%M:%S')
+        if self._pending_focus_job_id:
+            self.job_sync_status.setText('VPS đã nhận '+self._pending_focus_job_id+
+                f' · Đang chờ cập nhật vào danh sách ({len(display)} job đã đồng bộ lúc {updated}).')
+        else:
+            self.job_sync_status.setText(f'Đã đồng bộ {len(display)} job từ VPS lúc {updated} · '
+                'Job đang xử lý và job mới hiển thị trước.')
         labels={'completed':'Hoàn thành','failed':'Thất bại','cancelled':'Đã hủy',
                 'invalid_code':'Mã không hợp lệ','invite_limit_reached':'Đạt giới hạn 24h'}
         history=[{**r,'status':labels.get(r.get('status'),r.get('status','')),

@@ -519,3 +519,24 @@ Quy trình phát triển và hoàn thiện công cụ trải qua 8 vòng lặp (
   chưa xác nhận (tổng713 ca riêng biệt). Ubuntu chạy lại classic13 + remote26 +
   hoshino_ui17 đều qua. Sáu module GUI mới và bản `src/` giống byte-for-byte.
 
+### Hiển thị và đồng bộ job từ máy tính/bot — 03/11/2026
+
+- Kiểm tra API VPS thật trả26 job có cả Local và Telegram; Qt polling thật cũng
+  nhận đủ26 dòng. Bảng cũ xếp job theo thứ tự tạo tăng dần nên các job mới nằm
+  dưới hàng loạt kết quả cũ, trong khi tạo job không tự mở/chọn dòng vừa tạo.
+  Các job kết thúc nhanh vì giới hạn24h vẫn tồn tại nhưng khó thấy ở cuối bảng.
+- Client nay ưu tiên job chưa kết thúc, trong mỗi nhóm xếp mới nhất trước. Tạo
+  job thành công mở Nhiệm vụ/Job đang chạy và focus đúng job_id sau snapshot kế
+  tiếp; vẫn chọn đúng nếu job đã kết thúc nhanh. Không lặp POST để tìm job.
+- Có nút Đồng bộ VPS và nhãn tổng số/giờ cập nhật. Vào tab đang chạy sẽ lấy state
+  mới; yêu cầu refresh trong khi đang poll/gửi lệnh được gom chờ thực hiện sau.
+  Bot jobs cập nhật qua timer cùng snapshot; giữ editor và lựa chọn theo ID.
+  Mất kết nối ghi rõ đang xem lần đồng bộ trước. Tooltip từng ô giữ mã job.
+- `tests/test_remote_job_sync.py` thêm5 ca HTTP/Qt thực với Runtime tạm, chặn
+  worker.start: desktop và Telegram callback thật tạo job, >20 job cũ, tự poll,
+  auto focus/tab, kết thúc trước refresh, active-first và không tạo trùng POST.
+  Bộ classic13 và remote26 chạy lại qua cùng5 ca mới (44 ca liên quan).
+- Xác minh với snapshot VPS thật:26 job, job mới nhất ở đầu, polling tiếp tục.
+  Không tạo job vận hành hoặc chạy shop/bot thật khi thử. Chỉ đổi client/tests/
+  tài liệu, không thay API hoặc restart dịch vụ đang xử lý.
+

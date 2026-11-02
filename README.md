@@ -9,6 +9,10 @@
 > Dashboard, biểu mẫu job hai cột, các tab Mochi, bảng proxy và ba tab Telegram.
 > Kết nối VPS tại **Cài đặt chung → Hạ tầng chung**; xử lý vẫn chạy trên VPS.
 
+> **Đồng bộ job VPS:** bảng Job đang chạy ưu tiên job đang xử lý và job mới;
+> tạo từ máy tính tự mở/chọn job, job từ bot tự cập nhật. Có nút **Đồng bộ VPS**
+> và thời điểm cập nhật; job kết thúc nhanh vẫn được hiển thị.
+
 > Thêm [Mochi Chat → Lấy mã mời](LAY_MA_MOI_TAI_KHOAN_2026-11-02.md): nhập email/mật khẩu Google để thu thập mã mời, tên hiển thị và số dư beans của tài khoản, kèm ID và giờ cập nhật. Có lưu danh sách, sao chép mã và xuất CSV; không lưu mật khẩu/token. Đối chiếu API với `mochi-api-analysis` và XAPK 1.3.2/build38, dùng `remainingQuota` để đọc beans.
 
 > Thêm [ô gửi thông báo hàng loạt cho admin/partner](THONG_BAO_TELEGRAM_2026-11-02.md): **Telegram → Người dùng và bot → Gửi thông báo đến admin / partner**. Bật bot, nhập nội dung và bấm Gửi thông báo. Có số người nhận, bộ đếm độ dài, tiến độ thành công/lỗi/bỏ qua và Dừng gửi; chỉ gửi tới các ID đang được cấp quyền.

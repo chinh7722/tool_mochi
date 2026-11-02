@@ -96,7 +96,7 @@ class ClassicRemoteUiTests(unittest.TestCase):
         state=deepcopy(self.state)
         state['jobs']=[job('first'),job('second')]
         self.render(state)
-        self.window.jobs.selectRow(1)
+        self.window.jobs.selectRow(next(i for i,r in enumerate(self.window.jobs._rows) if r['job_id']=='second'))
         state['jobs']=[job('second'),job('first')]
         self.render(state)
         self.assertEqual(self.window.selected(self.window.jobs,'job_id'),'second')
@@ -107,7 +107,7 @@ class ClassicRemoteUiTests(unittest.TestCase):
         state=deepcopy(self.state)
         state['jobs']=[job('first'),job('second')]
         self.render(state)
-        self.window.jobs.selectRow(1)
+        self.window.jobs.selectRow(next(i for i,r in enumerate(self.window.jobs._rows) if r['job_id']=='second'))
         state['jobs']=[job('first')]
         self.render(state)
         self.window.selected_send(self.window.jobs,'job_id','job.stop')
@@ -201,8 +201,10 @@ class ClassicRemoteUiTests(unittest.TestCase):
         state=deepcopy(self.state)
         state['jobs']=[job('first'),job('second')]
         self.render(state)
-        self.window.jobs.selectRow(0)
-        buttons=self.window.jobs.cellWidget(1,7).findChildren(QPushButton)
+        first=next(i for i,r in enumerate(self.window.jobs._rows) if r['job_id']=='first')
+        second=next(i for i,r in enumerate(self.window.jobs._rows) if r['job_id']=='second')
+        self.window.jobs.selectRow(first)
+        buttons=self.window.jobs.cellWidget(second,7).findChildren(QPushButton)
         next(button for button in buttons if button.text()=='Log').click()
         self.assertEqual(self.calls,[('job.logs',{'job_id':'second'})])
         self.assertEqual(self.window.mochi_tabs.currentIndex(),2)

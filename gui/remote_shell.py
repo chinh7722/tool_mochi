@@ -28,6 +28,8 @@ def initialize(self):
     self._job_row_buttons=[]
     self._config_loaded=False
     self._log_job_id=None
+    self._refresh_requested=False
+    self._pending_focus_job_id=None
     self.proxy_views={}
     self.url=QLineEdit(str(self.preferences.value('url','http://127.0.0.1:8765')))
     self.url.setPlaceholderText('http://127.0.0.1:8765')
