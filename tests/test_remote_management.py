@@ -174,6 +174,8 @@ class RuntimeTests(unittest.TestCase):
         self.assertFalse(self.runtime.mochi._workers)
         self.runtime.command('job.stop',{'job_id':jid})
         self.assertEqual(self.runtime.telegram.store.get_job(jid).status,'cancelled')
+        csv_text=self.runtime.command('history.export',{})['text']
+        self.assertIn(jid,csv_text)
 
     def test_proxy_import_is_independent_and_hides_credentials(self):
         r=self.runtime
@@ -181,6 +183,9 @@ class RuntimeTests(unittest.TestCase):
         self.assertEqual(len(r.state()['proxies']),1)
         self.assertEqual(len(r.state()['mail_proxies']),0)
         self.assertNotIn(b'private-proxy-pass',encode(r.state()))
+        exported=r.command('proxy.export',{'pool':'account'})['text']
+        self.assertIn('private-proxy-pass',exported)
+        self.assertIn('test-key',exported)
 
     def test_customer_balance_uses_existing_concurrent_update_guard(self):
         r=self.runtime

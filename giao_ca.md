@@ -1,5 +1,9 @@
 # Biên Bản Giao Ca & Nhật Ký Phát Triển Dự Án (Giao_ca.md)
 
+> **02/11/2026 — chuyển sang VPS Ubuntu và quản lý từ Windows:** hướng dẫn mới tại
+> [docs/VPS_UBUNTU.md](docs/VPS_UBUNTU.md). Launcher mặc định mở trình quản lý VPS;
+> `--local` mở bản cũ. Không áp dụng mô tả “100% Local” lịch sử cho chế độ VPS.
+
 > Cập nhật ưu tiên mới nhất: người dùng yêu cầu lấy cách xử lý bản chính. Đã đối chiếu EXE gốc và áp dụng kiểm tra IP có fallback, session `chrome_android` timeout 45 giây; không dùng HEAD Mochi làm điều kiện bắt buộc và không áp giới hạn kết nối 10 giây trước request đầu tiên. Chi tiết: [DOI_CHIEU_BAN_CHINH.md](DOI_CHIEU_BAN_CHINH.md).
 
 > Bổ sung sau rà soát ngày 31/10/2026: [RA_SOAT_2026-10-31.md](RA_SOAT_2026-10-31.md) ghi các lỗi logic tìm thấy và bản sửa mới. Tuyên bố “Production Ready - 0 Warning/Error” bên dưới là nội dung bàn giao cũ, không phải kết luận kiểm chứng của lần rà soát này.
@@ -424,4 +428,49 @@ Quy trình phát triển và hoàn thiện công cụ trải qua 8 vòng lặp (
 - UI giữ overlay kết quả chưa lưu để Refresh không làm mất; thử lưu lại khi DB hồi phục. DB init lỗi không làm crash trang khác, vẫn cho lookup/copy/export; CSV standalone không cầnSQLite. Browser progress chỉ phase cố định, không lưu pass/token vào profile/CSV/QtSettings. Kết quả lookup không đi qua job registrar/Telegram/finance/mail purchase/redeem; AccountLookupError không echo rawURL, secret hoặc body.
 - Hai subagent hỗ trợ: analyze_mochi_profile_api xác minh binary/evidence và review GUI, viết tests/test_account_lookup_ui.py27 ca; review_profile_lookup_integration viết backend/fetcher/tests/test_account_lookup.py36 ca. Reviewer tái hiện3 lỗi (release exception lộ raw, refresh mất unsavedrow, export bị khóa khi DBfail), root sửa cả3 và regression tests qua. UI preview .tmp/hoshino_account_lookup.png ở1280×900 min1205×712, bảng tối và primarybutton theo theme; dữ liệu demo temp, không login thật.
 - Full verify_customers657 ca PASS (thêm lookup36+UI27 và mochi_tls25/proxy_dns16 vào suite), 38 cặp source/src byte-identical/compile hợp lệ. Hướng dẫn LAY_MA_MOI_TAI_KHOAN_2026-11-02.md; mở lại launcher, chưa build EXE. Chưa có credentials thử nên chưa xác minh Google/backend live; API schema static của1.3.2 được fail-closed khi server khác dữ liệu.
+
+### VPS Ubuntu và ứng dụng Windows quản lý từ xa — 02/11/2026
+
+- Thêm `main_mochi_server.py`, `core/remote/` và bản tương ứng trong `src/`.
+  Dịch vụ sở hữu các controller PySide6 hiện có, chạy Qt offscreen không mở cửa sổ;
+  giữ luồng worker, giới hạn job, lịch hẹn, Telegram, khách hàng, SePay và tài chính.
+  Đây là host tương thích, backend vẫn phụ thuộc PySide6; chưa tách hoàn toàn Qt
+  khỏi logic điều phối.
+- API HTTP chỉ bind localhost, Bearer token >=32 ký tự, giới hạn body và số yêu cầu,
+  không redirect hoặc dùng proxy môi trường trên client. HTTP thread chỉ gửi Qt
+  signal; thao tác controller/SQLite điều phối trên thread Qt. Mutation journal
+  SQLite lưu request UUID, digest có salt UUID và kết quả, không lưu request body
+  chứa mật khẩu/key. Lệnh gián đoạn không rõ kết quả không tự thực hiện lại.
+- `gui/remote_window.py` là trình quản lý Windows với Dashboard, job/log/lịch sử,
+  lấy mã mời, hai pool proxy, bot/thông báo, người dùng/key riêng, ví khách,
+  SePay và đối soát. Chỉ gọi API, không khởi tạo worker/bot/SQLite vận hành local.
+  Chế độ mặc định đổi sang remote; các launcher cũ gọi `Launch_VPS_Manager.bat`.
+  `Open_VPS_Tunnel.bat` mở SSH tunnel; không chứa mật khẩu. Token quản lý local
+  nằm trong `data/remote_connection.json`, bị loại khỏi Git.
+- Thêm `HOSHINO_DATA_DIR` và chuyển vị trí mặc định lô mail sang thư mục dữ liệu
+  của dịch vụ. Cấu hình INI, SQLite, lịch sử và proxy state nằm tại `/var/lib/hoshino`;
+  source/venv ở `/opt/hoshino`. Dịch vụ systemd chạy user riêng `hoshino`, tự bật
+  cùng VPS, có dừng/cleanup và khóa chống hai runtime dùng chung dữ liệu.
+- VPS đã xác minh Ubuntu 22.04.5 x86_64, RAM khoảng8GB. Cài Python3.12 riêng bằng
+  uv, clean Linux wheels và Chromium Playwright; không thay Python3.10 hệ thống.
+  `hoshino.service` đã active/enabled, chỉ lắng nghe127.0.0.1:8765. Đọc trạng thái
+  thành công cả trực tiếp trên VPS và từ Windows qua SSH tunnel. Trạng thái lúc
+  nghiệm thu không có job đang chạy/chờ/hẹn, bot và SePay chưa bật.
+- Thêm `scripts/prepare_repository.py`, manifest SHA256, `.gitignore` theo danh
+  sách cho phép, `.gitattributes`, requirements, bộ verify và GitHub Actions.
+  Archive chỉ chứa source/assets/docs/tests; không chứa data, token, `.tmp`,
+  môi trường ảo, DLL/EXE/XAPK hoặc thư viện Windows đã giải nén. Đồng bộ thêm9
+  cặp nguồn cũ vốn chỉ khác newline cuối file.
+- Full regression Windows699 ca qua; Ubuntu698 ca qua trước test process mới;
+  sau đó bộ remote26 ca qua ở cả Windows và Ubuntu, bao gồm giữ dịch vụ khi đóng
+  trình quản lý, phục hồi lịch sau restart, khóa runtime và replay không tạo job
+  thứ hai. Tổng700 ca riêng biệt liên quan đã qua. Preview giao diện tại
+  `.tmp/hoshino_vps_manager.png` và `.tmp/hoshino_vps_connected.png`.
+- Chưa chạy mua mail/đăng nhập Google/nhập mã, gửi Telegram hoặc giao dịch SePay
+  thật trong kiểm chứng. Dữ liệu local đang có không tự đưa vào GitHub hoặc ghi
+  đè dữ liệu VPS. Nếu chuyển lịch/lô cũ, đóng bản local và đổi đường dẫn lô từ
+  Windows sang đường dẫn VPS theo hướng dẫn trước khi bật bot/lịch.
+- Repository mục tiêu `chinh7722/tool_mochi`: source đã được commit trong checkout
+  trên VPS; push cần phiên GitHub có quyền ghi. Xác minh trạng thái push thực tế
+  trước khi nói mã đã được xuất bản. Không lưu mật khẩu SSH trong mã hoặc tài liệu.
 

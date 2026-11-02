@@ -106,7 +106,7 @@ class Runtime:
             'user.mail_keys', 'user.jobs', 'customer.save', 'customer.delete', 'customer.balance',
             'customer.history', 'customer.settle', 'finance.ledger', 'finance.reconcile',
             'finance.price', 'sepay.save', 'sepay.start', 'sepay.stop', 'sepay.reconcile',
-            'lookup.start', 'lookup.cancel', 'batch.upload', 'batch.list')}
+            'lookup.start', 'lookup.cancel', 'batch.upload', 'batch.list', 'history.export', 'proxy.export')}
         if action not in actions or not isinstance(data, dict):
             raise RemoteError('Lệnh quản lý không được hỗ trợ.')
         return actions[action](data) or {'message': 'Đã nhận lệnh.'}
@@ -161,6 +161,14 @@ class Runtime:
         ids, duplicates, invalid = self.pool(data)._import_proxy_lines(lines, provider)
         self.settings.sync()
         return dict(message=f'Đã thêm {len(ids)} proxy, trùng {duplicates}, lỗi {len(invalid)} dòng.', invalid=invalid)
+
+    def do_proxy_export(self, data):
+        return {'text':'\n'.join(self.pool(data)._serialize_proxy_lines())+'\n'}
+
+    def do_history_export(self, data):
+        path=self.mochi.job_history_store.path
+        self.mochi.job_history_store.read()
+        return {'text':path.read_text(encoding='utf-8-sig') if path.exists() else ''}
 
     def proxy_item(self, data):
         page = self.pool(data)

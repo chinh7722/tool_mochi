@@ -289,7 +289,14 @@ class RemoteMainWindow(QMainWindow):
         logs_box.addWidget(self.logs)
         tabs.addTab(logs,'Log job')
         self.history = table(['Mã job','Mã đơn','Người tạo','Mã mời','Trạng thái','Bean thực tế','Kết thúc'])
-        tabs.addTab(self.history,'Lịch sử job')
+        history_page=QWidget(); history_box=QVBoxLayout(history_page)
+        history_box.addWidget(QLabel('Hiển thị tối đa 500 job gần nhất. Xuất CSV để lấy toàn bộ lịch sử trên VPS.'))
+        history_box.addWidget(self.history)
+        actions=QHBoxLayout()
+        self.button('Xuất CSV lịch sử từ VPS',lambda:self.send('history.export',callback=
+            lambda r:self.save_text(r,'job_history.csv','CSV (*.csv)',bom=True)),actions)
+        history_box.addLayout(actions)
+        tabs.addTab(history_page,'Lịch sử job')
         lookup = QWidget(); lookup_box = QVBoxLayout(lookup); lookup_form = QFormLayout()
         self.lookup_email = QLineEdit(); self.lookup_password = QLineEdit()
         self.lookup_password.setEchoMode(QLineEdit.EchoMode.Password)
@@ -382,6 +389,8 @@ class RemoteMainWindow(QMainWindow):
         self.button('Thêm proxy',lambda:self.send('proxy.import',dict(pool=pool,provider=provider.currentData(),text=text.toPlainText()),lambda _:text.clear()),actions)
         self.button('Nhập TXT',lambda:self.import_proxy_file(pool,provider),actions)
         self.button('Kiểm tra tất cả',lambda:self.send('proxy.check',{'pool':pool}),actions)
+        self.button('Xuất TXT',lambda:self.send('proxy.export',{'pool':pool},
+            lambda r:self.save_text(r,'proxies.txt','TXT (*.txt)')),actions)
         box.addLayout(actions)
         listing = table(['ID','Proxy','Trạng thái','Nhà cung cấp','Tốc độ','Lỗi'])
         setattr(self,'proxy_table_'+pool,listing)
@@ -390,6 +399,19 @@ class RemoteMainWindow(QMainWindow):
             self.button(caption,lambda _=False,a=action:self.selected_send(listing,'id',a,{'pool':pool}),actions)
         box.addLayout(actions)
         return page
+
+    def save_text(self,result,name,file_filter,*,bom=False):
+        path,_=QFileDialog.getSaveFileName(self,'Lưu dữ liệu từ VPS',name,file_filter)
+        if not path:
+            return
+        from PySide6.QtCore import QSaveFile,QIODevice
+        target=QSaveFile(path)
+        content=result.get('text','').encode('utf-8-sig' if bom else 'utf-8')
+        if not target.open(QIODevice.OpenModeFlag.WriteOnly):
+            self.status.setText('Chưa mở được file để lưu.'); return
+        if target.write(content)!=len(content) or not target.commit():
+            target.cancelWriting(); self.status.setText('Chưa lưu được file.'); return
+        self.status.setText('Đã lưu file từ VPS.')
 
     def import_proxy_file(self,pool,provider):
         path,_ = QFileDialog.getOpenFileName(self,'Nhập proxy','','TXT (*.txt)')

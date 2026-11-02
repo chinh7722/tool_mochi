@@ -164,7 +164,8 @@ def main():
                         except (RemoteError,ValueError) as exc:
                             # Controllers use safe validation strings. No raw HTTP exceptions.
                             return {'ok':False,'error':str(exc)}
-                    readonly = ('job.logs','user.jobs','customer.history','finance.ledger','batch.list')
+                    readonly = ('job.logs','user.jobs','customer.history','finance.ledger','batch.list',
+                                'history.export','proxy.export')
                     command.result = (invoke() if command.action in readonly else
                         journal.execute(command.request_id,command.action,command.payload,invoke))
             except RemoteError as exc:
