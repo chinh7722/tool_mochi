@@ -901,18 +901,31 @@ class TelegramPage(QWidget):
         self.btn_send_broadcast.setEnabled(not self._closing and not busy and bool(text.strip()) and size<=4000)
         self.btn_cancel_broadcast.setEnabled(not self._closing and busy)
 
-    def _send_broadcast(self):
+    def _resolve_broadcast_recipients(self, recipients=None):
+        eligible = tuple(user.chat_id for user in self.store.list_users()
+            if user.active and user.chat_id>0 and user.role in ('admin','partner'))
+        if recipients is None:
+            if not eligible:
+                raise ValueError('Chưa có admin/partner đang được cấp quyền để nhận thông báo.')
+            return eligible
+        if (not isinstance(recipients,(list,tuple)) or not 1<=len(recipients)<=2000
+                or any(type(chat_id) is not int or not 1<=chat_id<=2**63-1 for chat_id in recipients)):
+            raise ValueError('Chọn từ 1 đến 2000 admin/partner với Chat ID hợp lệ để nhận thông báo.')
+        selected = tuple(dict.fromkeys(recipients))
+        if not set(selected).issubset(eligible):
+            raise ValueError('Danh sách người nhận đã thay đổi hoặc có người không còn được cấp quyền. '
+                'Làm mới danh sách rồi chọn lại.')
+        return selected
+
+    def _send_broadcast(self, *, recipients=None):
         if self._broadcast_id is not None or self._closing:
-            return
+            return False
         try:
             text=validate_announcement(self.input_broadcast.toPlainText())
             worker=self.worker
             if worker is None or not self._accepting_requests or not callable(getattr(worker,'broadcast',None)):
                 raise ValueError('Bật bot và chờ kết nối sẵn sàng trước khi gửi thông báo.')
-            recipients=tuple(user.chat_id for user in self.store.list_users()
-                if user.active and user.chat_id>0 and user.role in ('admin','partner'))
-            if not recipients:
-                raise ValueError('Chưa có admin/partner đang được cấp quyền để nhận thông báo.')
+            recipients=self._resolve_broadcast_recipients(recipients)
             worker.access.replace(self.store.active_ids(),roles=self.store.roles())
             self._broadcast_id=uuid.uuid4().hex
             self._broadcast_fingerprint=worker.fingerprint
@@ -922,6 +935,8 @@ class TelegramPage(QWidget):
             if not worker.broadcast(self._broadcast_id,recipients,text):
                 self._on_broadcast_failed(worker.fingerprint,self._broadcast_id,
                     'Bot chưa sẵn sàng. Nội dung được giữ; chưa bắt đầu lượt gửi.')
+                return False
+            return True
         except ValueError as exc:
             self.lbl_broadcast_status.setText(str(exc))
         except Exception:
@@ -929,6 +944,7 @@ class TelegramPage(QWidget):
                 self._on_broadcast_failed(self._broadcast_fingerprint,self._broadcast_id,'Không bắt đầu được lượt gửi thông báo.')
             else:
                 self.lbl_broadcast_status.setText('Không đọc được danh sách người nhận; chưa gửi thông báo.')
+        return False
 
     def _show_broadcast_progress(self,state):
         self._broadcast_last=state

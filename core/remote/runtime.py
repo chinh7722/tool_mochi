@@ -75,7 +75,8 @@ class Runtime:
             customers=t.store.list_customers()[:1000], history=[asdict(row) for row in history],
             telegram=dict(running=t.worker is not None, ready=t._accepting_requests,
                 status=t.lbl_status.text(), has_token=bool(t.input_token.text()),
-                auto_start=t.chk_auto_start.isChecked(), broadcast=t.lbl_broadcast_status.text()),
+                auto_start=t.chk_auto_start.isChecked(), broadcast=t.lbl_broadcast_status.text(),
+                broadcast_running=t._broadcast_id is not None, broadcast_recipient_selection=True),
             sepay=dict(running=t.sepay_page.worker is not None, status=t.sepay_page.status.text(),
                 has_token=bool(t.sepay_page.fields['token'].text()),
                 enabled=t.sepay_page.auto.isChecked(),
@@ -270,9 +271,25 @@ class Runtime:
         self.telegram._stop_bot()
 
     def do_telegram_broadcast(self, data):
+        from core.telegram_broadcast import validate_announcement
         t = self.telegram
-        t.input_broadcast.setPlainText(text_field(data,'text',maximum=4000))
-        t._send_broadcast()
+        if t._broadcast_id is not None:
+            raise RemoteError('Đang gửi một thông báo khác; chờ hoàn tất hoặc dừng lượt hiện tại.')
+        if t._closing or t.worker is None or not t._accepting_requests:
+            raise RemoteError('Bật bot và chờ kết nối sẵn sàng trước khi gửi thông báo.')
+        recipients = data.get('recipients')
+        if 'recipients' in data and not isinstance(recipients,list):
+            raise RemoteError('Danh sách người nhận phải là danh sách Chat ID.')
+        # Validate the entire selection before changing the editor or creating a
+        # campaign. Empty/null/stale selections must never fall back to everyone.
+        try:
+            t._resolve_broadcast_recipients(recipients)
+            text = validate_announcement(text_field(data,'text',maximum=4000))
+        except ValueError as exc:
+            raise RemoteError(str(exc)) from None
+        t.input_broadcast.setPlainText(text)
+        if not t._send_broadcast(recipients=recipients):
+            raise RemoteError(t.lbl_broadcast_status.text())
         return {'message': t.lbl_broadcast_status.text()}
 
     def do_telegram_cancel_broadcast(self, data):

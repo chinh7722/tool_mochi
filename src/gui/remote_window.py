@@ -126,6 +126,8 @@ class RemoteMainWindow(QMainWindow):
             view.set_actions_enabled(active)
         for button,allowed in self._job_row_buttons:
             button.setEnabled(active and allowed)
+        if hasattr(self,'telegram_presentation'):
+            self.telegram_presentation.update_broadcast_controls()
 
     def task(self,callback,on_result):
         worker = RequestWorker(callback,self)

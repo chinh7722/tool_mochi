@@ -4,6 +4,7 @@ All controls call the remote manager's existing API callbacks. This module never
 creates a bot, a worker controller or an operational SQLite store.
 """
 from decimal import Decimal
+from gui.broadcast_recipients import BroadcastRecipients
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
@@ -84,6 +85,7 @@ class TelegramPresentation:
     """Refresh view-only summaries and table filters without editing form drafts."""
     def __init__(self,window):
         self.window=window
+        self._broadcast_pending=False
 
     def _filter(self,table,text,keys):
         query=text.strip().casefold()
@@ -109,11 +111,61 @@ class TelegramPresentation:
         w.broadcast_length.setText(f'{size:,} / 4000')
         w.broadcast_length.setStyleSheet('background:transparent; color:'+
             ('#fb7185' if size>4000 else '#9ba9c0')+'; font-size:11px;')
+        self.update_broadcast_controls()
+
+    def update_broadcast_controls(self):
+        w = self.window
+        if not hasattr(w,'broadcast_send_button'):
+            return
+        recipients = w.broadcast_recipients.recipient_ids()
+        connected = w._connected and not w._closing and not w.snapshot.get('closing',False)
+        supported = w.snapshot.get('telegram',{}).get('broadcast_recipient_selection') is True
+        ready = bool(w.snapshot.get('telegram',{}).get('running') and w.snapshot.get('telegram',{}).get('ready'))
+        busy = self._broadcast_pending or bool(w.snapshot.get('telegram',{}).get('broadcast_running',False))
+        mutable = connected and not w._mutating
+        text = w.broadcast.toPlainText()
+        size = len(text.encode('utf-16-le'))//2
+        w.broadcast_send_button.setEnabled(mutable and supported and ready and not busy and 0<len(recipients)<=2000
+            and bool(text.strip()) and size<=4000)
+        w.broadcast_cancel_button.setEnabled(mutable and busy)
+        w.broadcast_recipients.setEnabled(not busy)
+        w.broadcast_audience.setText((f'Người nhận: {len(recipients)} admin/partner đã chọn. '
+            'Mỗi người nhận một tin nhắn riêng.'+(' Tối đa 2000 người mỗi lượt.' if len(recipients)>2000 else ''))
+            if supported else 'VPS cần cập nhật để chọn người nhận.')
+
+    def send_broadcast(self):
+        w = self.window
+        if w.snapshot.get('telegram',{}).get('broadcast_recipient_selection') is not True:
+            w.broadcast_status.setText('VPS cần cập nhật để chọn người nhận.')
+            return
+        if (not w._connected or w._mutating or w._closing or w.snapshot.get('closing',False)
+                or self._broadcast_pending or w.snapshot.get('telegram',{}).get('broadcast_running',False)):
+            return
+        if not (w.snapshot.get('telegram',{}).get('running') and w.snapshot.get('telegram',{}).get('ready')):
+            w.broadcast_status.setText('Bật bot và chờ kết nối sẵn sàng trước khi gửi thông báo.')
+            return
+        recipients = w.broadcast_recipients.recipient_ids()
+        if not recipients:
+            w.broadcast_status.setText('Chọn ít nhất một admin/partner trước khi gửi thông báo.')
+            return
+        if len(recipients)>2000:
+            w.broadcast_status.setText('Chọn tối đa 2000 người cho mỗi lượt gửi thông báo.')
+            return
+        text = w.broadcast.toPlainText()
+        if not text.strip() or len(text.encode('utf-16-le'))//2>4000:
+            w.broadcast_status.setText('Nhập thông báo từ 1 đến 4000 ký tự theo bộ đếm trước khi gửi.')
+            return
+        self._broadcast_pending=True
+        self.update_broadcast_controls()
+        w.send('telegram.broadcast',{'text':text,'recipients':list(recipients)})
 
     def refresh(self,state):
         # Import lazily: remote_window delegates construction to this module.
         from gui.remote_window import fill
         w=self.window
+        # Keep Send locked between the accepted POST and its following state poll.
+        if not w._mutating and not w._refresh_requested:
+            self._broadcast_pending=False
         records=state.get('users',[])
         users=[{**row,'role_label':'local' if row.get('chat_id')==-1 else row.get('role',''),
             'access_label':'Máy tính' if row.get('chat_id')==-1 else
@@ -134,8 +186,7 @@ class TelegramPresentation:
         cost=sum(r.get('cost_units',0) for r in records)
         for name,value in (('revenue',revenue),('cost',cost),('profit',revenue-cost)):
             w.telegram_money_values[name].setText(_vnd(value))
-        w.broadcast_audience.setText(f'Người nhận: {active} admin/partner đang được cấp quyền. '
-            'Mỗi người nhận một tin nhắn riêng.')
+        w.broadcast_recipients.set_users(records)
         w.telegram_sale_rate.setText(str(state.get('settings',{}).get('sale_rate') or 'Chưa cấu hình')+' VND / 100 bean')
         customers=[{**row,'balance':_vnd(row.get('balance_units',0))} for row in state.get('customers',[])]
         fill(w.customers,customers,['chat_id','name','balance','total_orders','completed_orders','failed_orders'])
@@ -146,6 +197,7 @@ class TelegramPresentation:
         w.bot_status.setText(state.get('telegram',{}).get('status','Bot chưa bật.'))
         w.broadcast_status.setText(state.get('telegram',{}).get('broadcast',''))
         w.sepay_status.setText(state.get('sepay',{}).get('status','SePay chưa bật.'))
+        self.update_broadcast_controls()
 
 
 def build_telegram_page(window):
@@ -202,8 +254,10 @@ def build_telegram_page(window):
     announcement,announcement_box=_card('Gửi thông báo đến admin / partner')
     w.broadcast_audience=_label('Người nhận: chưa kết nối VPS.',muted=True,size=11)
     announcement_box.addWidget(w.broadcast_audience)
+    w.broadcast_recipients=BroadcastRecipients()
+    announcement_box.addWidget(w.broadcast_recipients)
     w.broadcast=QPlainTextEdit()
-    w.broadcast.setPlaceholderText('Nhập nội dung thông báo gửi tới tất cả admin và partner đang được cấp quyền…')
+    w.broadcast.setPlaceholderText('Nhập nội dung thông báo gửi tới những người đã chọn…')
     w.broadcast.setMinimumHeight(100)
     w.broadcast.setMaximumHeight(160)
     announcement_box.addWidget(w.broadcast)
@@ -211,13 +265,14 @@ def build_telegram_page(window):
     w.broadcast_length=_label('0 / 4000',muted=True,size=11)
     actions.addWidget(w.broadcast_length)
     actions.addStretch()
-    w.button('Dừng gửi',lambda:w.send('telegram.cancel_broadcast'),actions)
-    _primary(w.button('Gửi thông báo',lambda:w.send('telegram.broadcast',{'text':w.broadcast.toPlainText()}),actions))
+    w.broadcast_cancel_button=w.button('Dừng gửi',lambda:w.send('telegram.cancel_broadcast'),actions)
+    w.broadcast_send_button=_primary(w.button('Gửi thông báo',presentation.send_broadcast,actions))
     announcement_box.addLayout(actions)
     w.broadcast_status=_label('Bật bot, nhập nội dung rồi bấm Gửi thông báo.')
     w.broadcast_status.setStyleSheet('background:transparent; color:#60a5fa; font-size:12px;')
     announcement_box.addWidget(w.broadcast_status)
     w.broadcast.textChanged.connect(presentation.update_broadcast_length)
+    w.broadcast_recipients.selection_changed.connect(presentation.update_broadcast_controls)
     body.addWidget(announcement)
 
     finance,finance_box=_card()

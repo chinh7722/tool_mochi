@@ -28,7 +28,7 @@
 
 > Thêm [Mochi Chat → Lấy mã mời](LAY_MA_MOI_TAI_KHOAN_2026-11-02.md): nhập email/mật khẩu Google để thu thập mã mời, tên hiển thị và số dư beans của tài khoản, kèm ID và giờ cập nhật. Có lưu danh sách, sao chép mã và xuất CSV; không lưu mật khẩu/token. Đối chiếu API với `mochi-api-analysis` và XAPK 1.3.2/build38, dùng `remainingQuota` để đọc beans.
 
-> Thêm [ô gửi thông báo hàng loạt cho admin/partner](THONG_BAO_TELEGRAM_2026-11-02.md): **Telegram → Người dùng và bot → Gửi thông báo đến admin / partner**. Bật bot, nhập nội dung và bấm Gửi thông báo. Có số người nhận, bộ đếm độ dài, tiến độ thành công/lỗi/bỏ qua và Dừng gửi; chỉ gửi tới các ID đang được cấp quyền.
+> Thêm [ô gửi thông báo cho admin/partner được chọn](THONG_BAO_TELEGRAM_2026-11-02.md): **Telegram → Người dùng và bot → Gửi thông báo đến admin / partner**. Chọn tất cả, chỉ admin, chỉ partner hoặc tích từng người; kiểm tra số người đã chọn, nhập nội dung và bấm Gửi thông báo. Có bộ đếm độ dài, tiến độ thành công/lỗi/bỏ qua và Dừng gửi; chỉ gửi tới các ID đang được cấp quyền.
 
 > Thêm [hai API mua mail riêng cho từng admin/partner](API_RIENG_TELEGRAM_2026-11-02.md). Nhập tại **Telegram → Quản lý người dùng → chọn Chat ID → Lưu 2 API mua mail**, hoặc nhắn riêng `/mailapi KEY_GMAILVIP KEY_1TRIEUMAIL`. Cần đủ cả hai key trước khi tạo job. Nguồn shop, product ID và số luồng vẫn quản lý chung trên máy tính; job admin/partner không dùng API chung để thay thế key còn thiếu.
 

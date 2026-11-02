@@ -634,3 +634,26 @@ Quy trình phát triển và hoàn thiện công cụ trải qua 8 vòng lặp (
   `QUAN_LY_PARTNER_BOT_2026-11-03.md` và sửa phần quyền trong tài liệu Telegram cũ.
   Không thêm/xóa người dùng hoặc gửi tin Telegram thật trong kiểm chứng.
 
+### Chọn người nhận thông báo trên trình quản lý VPS — 03/11/2026
+
+- Thêm `gui/broadcast_recipients.py` vào khung thông báo: tất cả admin/partner,
+  chỉ admin, chỉ partner hoặc chọn từng người. Danh sách checkbox có tên/role/ID,
+  Chọn tất cả/Bỏ chọn tất cả và bộ đếm; chỉ nhận người active, không có Local/khách.
+- Lựa chọn custom giữ theo Chat ID khi polling/đổi tên/thứ tự, loại ID mất quyền
+  và không tự chọn người mới. Bộ lọc/bảng người dùng chung không thay người nhận.
+- Client luôn gửi `recipients` rõ ràng cho mọi chế độ. API từ chối rỗng/null/sai
+  kiểu/ID không đủ quyền hoặc quá2000 trước khi sửa nội dung và bắt đầu lượt gửi.
+  `_send_broadcast(recipients=...)` chốt tuple người nhận và tổng tiến độ; client
+  cũ không gửi trường này vẫn giữ hành vi tất cả. Lượt đang gửi không bị ghi đè.
+- State thêm `telegram.broadcast_running` và `broadcast_recipient_selection`.
+  Client khóa gửi nếu VPS cũ chưa xác nhận hỗ trợ, tránh backend cũ bỏ qua danh
+  sách rồi gửi nhầm tất cả. Khóa Send trong POST/đợi state, khi offline/closing,
+  bot chưa sẵn sàng hoặc không chọn ai; vẫn có Dừng gửi khi lượt đang chạy.
+- API13 + UI18 + HTTP/Qt integration3 ca mới: kiểm tra người nhận từ desktop
+  qua HTTP/journal tới sender giả, replay không gửi thêm, stale/empty không
+  fallback. Full Windows873 và Ubuntu873 ca PASS. Root/src byte-identical; kiểm tra preview
+  ở1120×760 và1280×900 tại `.tmp/broadcast_recipients_1120.png`/`_1280.png`.
+- Không gửi thông báo thật để thử. Hướng dẫn cập nhật tại
+  `THONG_BAO_TELEGRAM_2026-11-02.md`; đóng GUI Windows vẫn để VPS tiếp tục gửi.
+  Rollout phải giữ bot/SePay và không restart khi còn job hoặc thông báo đang gửi.
+
