@@ -6,7 +6,9 @@ THIS_DIR = Path(__file__).resolve().parent
 sys.path[:] = [str(THIS_DIR)] + [p for p in sys.path if p and Path(p).resolve() not in (THIS_DIR.parent, THIS_DIR)]
 
 import json
+import os
 from PyQt6.QtCore import QTimer
+from PyQt6.QtGui import QFontDatabase
 from PyQt6.QtWidgets import QApplication, QComboBox, QDialog, QDialogButtonBox, QFormLayout, QHBoxLayout, QLabel, QLineEdit, QMainWindow, QStackedWidget, QVBoxLayout, QWidget
 from desktop_pages import DashboardPage, SettingsPage, Sidebar, action, card, muted
 from jobs_page import JobsPage
@@ -66,8 +68,13 @@ class RemoteTelegramPage(TelegramPage):
 
 
 class RemoteWindow(QMainWindow):
-    def __init__(self, connection):
+    def __init__(self, connection, export_dir=None):
         super().__init__()
+        # Offscreen Qt has no native font discovery; register the same font the
+        # Windows desktop uses so Vietnamese text also renders in previews.
+        font = Path(os.environ.get("WINDIR", "C:/Windows")) / "Fonts/segoeui.ttf"
+        if font.exists():
+            QFontDatabase.addApplicationFont(str(font))
         self.connection = connection
         self.store = RemoteStore(connection)
         self.rows, self.hidden_ids = [], set()
@@ -99,6 +106,9 @@ class RemoteWindow(QMainWindow):
         layout = QHBoxLayout(central)
         layout.setContentsMargins(0, 0, 0, 0)
         self.sidebar = Sidebar()
+        for label in self.sidebar.findChildren(QLabel):
+            if label.text() == "Local edition · Konpeito":
+                label.setText("VPS edition · Konpeito")
         self.sidebar.navigate.connect(self.navigate)
         layout.addWidget(self.sidebar)
         self.pages = QStackedWidget()
@@ -107,6 +117,10 @@ class RemoteWindow(QMainWindow):
         self.dashboard.navigate.connect(self.navigate)
         self.dashboard.create_job.connect(lambda: self.navigate("jobs"))
         self.jobs = JobsPage(self.store)
+        self.jobs.history.csv_path = Path(export_dir or THIS_DIR / "data") / "vps_job_history.csv"
+        for label in self.jobs.findChildren(QLabel):
+            if "Thao tác trên giao diện bản local" in label.text():
+                label.setText("Mã được lưu vào hàng chờ trên VPS và xử lý theo thứ tự nhận.")
         self.jobs.btn_ui_run.setText("Tạo, chạy trên VPS")
         self.jobs.btn_api_run.hide()
         self.jobs.start_requested.connect(self.enqueue)
@@ -179,6 +193,9 @@ class RemoteWindow(QMainWindow):
         self.jobs.logs.load()
         self.executor_note.setText("Bộ thực thi VPS: " + state["executor"]["status"])
         self.executor_note.setStyleSheet("color:#25dc96;" if state["executor"]["ready"] else "color:#ffc54d;")
+        self.jobs.btn_ui_run.setText("Tạo, chạy trên VPS" if state["executor"]["ready"] else "Tạo job chờ trên VPS")
+        self.jobs.btn_pause_queue.setEnabled(state["executor"]["ready"])
+        self.jobs.setup_pause.setEnabled(state["executor"]["ready"])
         bot = state["bot"]
         self.telegram.accepting = bot["accepting"]
         self.telegram.status.setText(bot["status"])

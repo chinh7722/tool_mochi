@@ -30,7 +30,7 @@ class RemoteTests(unittest.TestCase):
         self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
         self.thread.start()
         self.connection = RemoteConnection("http://127.0.0.1:" + str(self.server.server_port), "x" * 40)
-        self.window = RemoteWindow(self.connection)
+        self.window = RemoteWindow(self.connection, export_dir=self.folder.name)
         self.wait(lambda: self.window._initialized)
 
     def wait(self, condition):

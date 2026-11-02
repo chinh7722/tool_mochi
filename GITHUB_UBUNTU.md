@@ -2,7 +2,7 @@
 
 Mô hình được yêu cầu: VPS chạy bot, hàng chờ, lịch sử và bộ thực thi; máy Windows chỉ mở giao diện quản lý từ xa. Tắt máy Windows không dừng dịch vụ VPS.
 
-**Trạng thái bộ thực thi: chưa hoàn thành.** Bot, API quản lý, lưu dữ liệu và giao diện từ xa đã có mã nguồn chạy không cần desktop trên VPS. Bộ thực thi thật của bản Windows nằm trong EXE được cung cấp, không nằm trong Controller. `MiraimindLocal/local_api.py:start_job` chỉ ghi nhận yêu cầu, không thực thi tác vụ. `clone/core` là bản tái dựng, có nhánh sinh ID phiên/MMUID dự phòng và khóa MMUID v3 không hợp lệ. Không thể dùng việc chạy thành công test mã hóa để khẳng định job thật chạy được.
+**Trạng thái bộ thực thi: chưa hoàn thành.** Bot, API quản lý, lưu dữ liệu và giao diện từ xa đã có mã nguồn chạy không cần desktop trên VPS. Bộ thực thi thật của bản Windows nằm trong EXE được cung cấp, không nằm trong Controller. `MiraimindLocal/local_api.py:start_job` chỉ ghi nhận yêu cầu, không thực thi tác vụ. `clone/core` là bản tái dựng, có nhánh sinh ID phiên/MMUID dự phòng. Kiểm tra `loginGuest` thật từ VPS ngày 02/11/2026 bị dịch vụ từ chối; chưa nhận được phiên thật. Khóa/IV MMUID v3 có độ dài AES hợp lệ; test mã hóa nội bộ không chứng minh giao thức được dịch vụ chấp nhận.
 
 `vps/executor.py:readiness` hiện báo chưa sẵn sàng. Dịch vụ cho phép nhận/lưu job nhưng giữ hàng chờ dừng, từ chối tiếp tục chạy bằng bộ thực thi chưa hoàn chỉnh. Cần hoàn thiện/port bộ thực thi thật và kiểm thử một job hợp lệ trên Linux trước khi mở chạy sản xuất. Không có tiến độ, doanh thu hay kết quả job giả. Hai nguồn mail được nối thử trong adapter là Mail.tm và TempMail.lol; chưa port đầy đủ các provider từ ứng dụng Windows.
 

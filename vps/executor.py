@@ -12,7 +12,7 @@ def readiness():
     from core.crypto.mmuid_codec import MMUID_V3_AES_KEY, MMUID_V3_AES_IV
     if len(MMUID_V3_AES_KEY) not in (16, 24, 32) or len(MMUID_V3_AES_IV) != 16:
         return False, "Mã clone có khóa/IV MMUID v3 không hợp lệ. Cần bộ thực thi Linux hoàn chỉnh trước khi chạy job thật."
-    return False, "Bộ thực thi clone chưa được xác minh tương đương bản Windows bằng job thật."
+    return False, "Adapter clone chưa lấy được phiên thật khi kiểm tra từ VPS. Cần hoàn thiện giao thức trước khi thực thi job."
 
 
 def require_success(response):
