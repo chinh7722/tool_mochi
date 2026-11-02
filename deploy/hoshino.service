@@ -1,0 +1,23 @@
+[Unit]
+Description=Hoshino Telegram and job service
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root1
+WorkingDirectory=/home/root1/hoshino-tool
+EnvironmentFile=/home/root1/.config/hoshino/server.env
+ExecStart=/home/root1/hoshino-tool/.venv/bin/python -I /home/root1/hoshino-tool/vps/run.py
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=130
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/home/root1/.local/share/hoshino
+
+[Install]
+WantedBy=multi-user.target
