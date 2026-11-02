@@ -5,7 +5,7 @@ import csv
 import json
 from pathlib import Path
 
-from PySide6.QtCore import QDateTime, QSettings, Qt, QThread, QTimer, Signal
+from PySide6.QtCore import QDateTime, QSettings, Qt, QThread, QTimer, Signal, QSignalBlocker
 from PySide6.QtWidgets import (QAbstractItemView, QApplication, QCheckBox, QComboBox,
     QDateTimeEdit, QDialog, QFileDialog, QFormLayout, QHBoxLayout, QLabel, QLineEdit,
     QMainWindow, QPlainTextEdit, QPushButton, QScrollArea, QSpinBox, QStackedWidget,
@@ -42,13 +42,20 @@ def table(headers):
     result.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
     result.horizontalHeader().setStretchLastSection(True)
     result.verticalHeader().hide()
+    result.verticalHeader().setDefaultSectionSize(44)
     result._rows = []
     return result
 
 
-def fill(widget, rows, keys):
+def fill(widget, rows, keys, *, identity_key=None):
+    if identity_key is None:
+        sample=rows[0] if rows else (widget._rows[0] if widget._rows else {})
+        identity_key=next((key for key in ('job_id','chat_id','transaction_id','id','email') if key in sample),keys[0] if keys else '')
     selected = widget.currentRow()
-    prior = widget._rows[selected].get(keys[0]) if 0<=selected<len(widget._rows) else None
+    prior = widget._rows[selected].get(identity_key) if 0<=selected<len(widget._rows) else None
+    blocker=QSignalBlocker(widget)
+    widget.clearSelection()
+    widget.setCurrentCell(-1,-1)
     widget.setRowCount(len(rows))
     widget._rows = rows
     for row,values in enumerate(rows):
@@ -57,103 +64,16 @@ def fill(widget, rows, keys):
             item = QTableWidgetItem('' if value is None else str(value))
             item.setToolTip(item.text())
             widget.setItem(row,column,item)
-        if values.get(keys[0])==prior:
+        if prior is not None and values.get(identity_key)==prior:
             widget.selectRow(row)
+    del blocker
 
 
 class RemoteMainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle('hoshino-tool · Quản lý VPS')
-        self.setWindowIcon(icon('app_icon'))
-        self.resize(1280,900)
-        self.setMinimumSize(1120,760)
-        self.setStyleSheet(WORKSPACE_STYLE + '''
-            QMainWindow,QWidget {background:#18181b;color:#edf2fc;font-family:'Segoe UI';font-size:13px;}
-            QLineEdit,QSpinBox,QComboBox,QPlainTextEdit,QDateTimeEdit,QTableWidget {
-                background:#232326;border:1px solid #41414a;border-radius:5px;padding:7px;}
-            QPushButton {background:#29292e;border:1px solid #41414a;border-radius:6px;padding:9px 13px;}
-            QPushButton:hover {background:#303744;border-color:#3b82f6;}
-            QPushButton:disabled {color:#71717a;}
-            QHeaderView::section {background:#29292e;padding:8px;border:1px solid #41414a;}
-            QTabBar::tab {padding:10px 14px;background:#232326;}
-            QTabBar::tab:selected {background:#253654;color:#60a5fa;}
-        ''')
-        self.preferences = QSettings('Hermit Coder','Hoshino Remote')
-        self.client = None
-        self.snapshot = {}
-        self._workers = set()
-        self._polling = False
-        self._mutating = False
-        self._closing = False
-        self._mutation_buttons = []
-        self._config_loaded = False
-        container = QWidget()
-        root = QHBoxLayout(container)
-        sidebar = BrandSidebar()
-        sidebar.setFixedWidth(210)
-        side = QVBoxLayout(sidebar)
-        title = QLabel('hoshino-tool')
-        title.setStyleSheet('font-size:24px;font-weight:800;padding:18px 0;')
-        side.addWidget(title)
-        side.addWidget(QLabel('QUẢN LÝ VPS'))
-        self.pages = QStackedWidget()
-        self.nav = []
-        for caption,builder in (
-            ('Dashboard',self.build_dashboard),('Mochi Chat',self.build_mochi),
-            ('Proxy Pool',lambda:self.build_proxy('account')),
-            ('Proxy mua mail',lambda:self.build_proxy('mail')),
-            ('Telegram',self.build_telegram),('Cài đặt chung',self.build_settings)):
-            page = builder()
-            scroll = QScrollArea()
-            scroll.setWidgetResizable(True)
-            scroll.setWidget(page)
-            index = self.pages.addWidget(scroll)
-            button = QPushButton(caption)
-            button.setCheckable(True)
-            button.clicked.connect(lambda _=False,i=index:self.activate(i))
-            self.nav.append(button)
-            side.addWidget(button)
-        side.addStretch()
-        note = QLabel('Job và bot chạy trên VPS.\nĐóng cửa sổ này vẫn tiếp tục chạy.')
-        note.setWordWrap(True)
-        side.addWidget(note)
-        root.addWidget(sidebar)
-        right = QVBoxLayout()
-        connection = QHBoxLayout()
-        self.url = QLineEdit(str(self.preferences.value('url','http://127.0.0.1:8765')))
-        self.url.setPlaceholderText('Địa chỉ qua SSH tunnel')
-        self.token = QLineEdit()
-        self.token.setEchoMode(QLineEdit.EchoMode.Password)
-        self.token.setPlaceholderText('Token quản lý VPS')
-        self.connect_button = QPushButton('Kết nối VPS')
-        self.connect_button.clicked.connect(self.connect_server)
-        for widget in (self.url,self.token,self.connect_button):
-            connection.addWidget(widget)
-        right.addLayout(connection)
-        self.status = QLabel('Mở SSH tunnel rồi kết nối VPS.')
-        self.status.setTextFormat(Qt.TextFormat.PlainText)
-        self.status.setWordWrap(True)
-        right.addWidget(self.status)
-        right.addWidget(self.pages,1)
-        root.addLayout(right,1)
-        self.setCentralWidget(container)
-        self.activate(0)
-        self.timer = QTimer(self)
-        self.timer.timeout.connect(self.poll)
-        self.timer.start(2500)
-        # Deployment may provision a local, gitignored API token; never an SSH password.
-        root_path = Path(__file__).resolve().parents[1]
-        if root_path.name=='src':
-            root_path = root_path.parent
-        self.connection_path = root_path/'data'/'remote_connection.json'
-        try:
-            config = json.loads(self.connection_path.read_text(encoding='utf-8'))
-            self.url.setText(config.get('url','http://127.0.0.1:8765'))
-            self.token.setText(config.get('token',''))
-        except (OSError,ValueError,TypeError):
-            pass
-        self.enable_actions(False)
+        from gui.remote_shell import initialize
+        initialize(self)
 
     def activate(self,index):
         self.pages.setCurrentIndex(index)
@@ -161,16 +81,15 @@ class RemoteMainWindow(QMainWindow):
             button.setChecked(number==index)
 
     def page(self,caption):
-        widget = QWidget()
-        box = QVBoxLayout(widget)
-        box.setContentsMargins(20,20,20,20)
-        title = QLabel(caption)
-        title.setStyleSheet('font-size:24px;font-weight:700;')
-        box.addWidget(title)
+        widget=QWidget()
+        box=QVBoxLayout(widget)
+        box.setContentsMargins(28,24,28,20)
+        box.setSpacing(14)
         return widget,box
 
     def button(self,caption,callback,layout,*,mutation=True):
         button = QPushButton(caption)
+        button.setCursor(Qt.CursorShape.PointingHandCursor)
         button.clicked.connect(callback)
         layout.addWidget(button)
         if mutation:
@@ -178,15 +97,20 @@ class RemoteMainWindow(QMainWindow):
         return button
 
     def selected(self,widget,key):
-        row = widget.currentRow()
-        if not 0<=row<len(widget._rows):
+        row=widget.currentRow()
+        if not 0<=row<len(widget._rows) or widget.isRowHidden(row):
             self.status.setText('Chọn một dòng trước khi thao tác.')
             return None
         return widget._rows[row].get(key)
 
     def enable_actions(self,enabled):
+        active=enabled and not self._mutating and not self._closing and not self.snapshot.get('closing',False)
         for button in self._mutation_buttons:
-            button.setEnabled(enabled and not self._mutating and not self._closing)
+            button.setEnabled(active)
+        for view in self.proxy_views.values():
+            view.set_actions_enabled(active)
+        for button,allowed in self._job_row_buttons:
+            button.setEnabled(active and allowed)
 
     def task(self,callback,on_result):
         worker = RequestWorker(callback,self)
@@ -216,6 +140,8 @@ class RemoteMainWindow(QMainWindow):
             return
         self.preferences.setValue('url',self.url.text().strip())
         self._config_loaded = False
+        self._connected=False
+        self.enable_actions(False)
         self.poll()
 
     def poll(self):
@@ -223,11 +149,11 @@ class RemoteMainWindow(QMainWindow):
             return
         self._polling = True
         worker = self.task(self.client.state,self.render)
-        worker.error.connect(lambda _:self.enable_actions(False))
+        worker.error.connect(self.connection_lost)
         worker.finished.connect(lambda:setattr(self,'_polling',False))
 
     def send(self,action,payload=None,callback=None):
-        if self.client is None or self._mutating or self._closing:
+        if self.client is None or not self._connected or self._mutating or self._closing or self.snapshot.get('closing',False):
             return
         self._mutating = True
         self.enable_actions(False)
@@ -238,84 +164,34 @@ class RemoteMainWindow(QMainWindow):
             if callback:
                 callback(result)
         worker = self.task(lambda:client.command(action,payload),received)
+        worker.error.connect(self.command_unconfirmed)
         def done():
             self._mutating = False
-            self.enable_actions(bool(self.snapshot))
+            self.enable_actions(self._connected)
             self.poll()
         worker.finished.connect(done)
 
+    def command_unconfirmed(self,message):
+        # A failed POST may already have reached the VPS. Recheck state first.
+        self._connected=False
+        self.enable_actions(False)
+
+    def connection_lost(self,message):
+        self._connected=False
+        self.enable_actions(False)
+        self.btn_connection.setText('○  Mất kết nối VPS')
+        self.btn_connection.setStyleSheet('text-align:left;background:transparent;border:none;color:#fbbf24;padding:8px 5px;font-size:11px;')
+
     def build_dashboard(self):
-        page,box = self.page('Dashboard')
-        self.dashboard_summary = QLabel('Chưa kết nối VPS.')
-        self.dashboard_summary.setStyleSheet('font-size:18px;padding:20px;')
-        self.dashboard_summary.setWordWrap(True)
-        box.addWidget(self.dashboard_summary)
-        self.dashboard_jobs = table(['Mã job','Mã mời','Người tạo','Trạng thái','Thành công','Mục tiêu'])
-        box.addWidget(self.dashboard_jobs,1)
-        return page
+        from gui.remote_workspace import build_dashboard
+        return build_dashboard(self)
 
     def build_mochi(self):
-        page,box = self.page('Mochi Chat')
-        tabs = QTabWidget()
-        setup = QWidget(); form = QFormLayout(setup)
-        self.job_code = QLineEdit(); self.job_customer = QLineEdit()
-        self.job_points = QSpinBox(); self.job_points.setRange(1,1000000); self.job_points.setValue(1000)
-        self.job_batch = QComboBox(); self.job_batch.addItem('Mua mail theo cấu hình VPS','')
-        self.schedule = QCheckBox('Hẹn giờ chạy (giờ Việt Nam)')
-        self.schedule_time = QDateTimeEdit()
-        self.schedule_time.setCalendarPopup(True)
-        self.schedule_time.setDisplayFormat('dd/MM/yyyy HH:mm')
-        vn = datetime.now(timezone(timedelta(hours=7)))+timedelta(hours=1)
-        self.schedule_time.setDateTime(QDateTime.fromString(vn.strftime('%Y-%m-%d %H:%M'),'yyyy-MM-dd HH:mm'))
-        for label,field in (('Mã mời',self.job_code),('Số bean',self.job_points),('Khách hàng / Job',self.job_customer),
-                ('Lô mail',self.job_batch),('',self.schedule),('Giờ chạy',self.schedule_time)):
-            form.addRow(label,field)
-        actions = QHBoxLayout()
-        self.button('Tạo job trên VPS',self.create_job,actions)
-        self.button('Đưa lô mail đã mua lên VPS',self.upload_batch,actions)
-        self.button('Làm mới danh sách lô',lambda:self.send('batch.list',callback=self.show_batches),actions)
-        form.addRow(actions)
-        tabs.addTab(setup,'Thiết lập job')
-        running = QWidget(); running_box = QVBoxLayout(running)
-        self.jobs = table(['Mã job','Khách hàng / Job','Người tạo','Mã mời','Trạng thái','Thành công','Mục tiêu','Hẹn giờ'])
-        running_box.addWidget(self.jobs)
-        actions = QHBoxLayout()
-        self.button('Dừng / Hủy lịch',lambda:self.selected_send(self.jobs,'job_id','job.stop'),actions)
-        self.button('Xem log',self.load_logs,actions)
-        running_box.addLayout(actions)
-        tabs.addTab(running,'Job đang chạy')
-        logs = QWidget(); logs_box = QVBoxLayout(logs)
-        self.logs = QPlainTextEdit(); self.logs.setReadOnly(True)
-        logs_box.addWidget(self.logs)
-        tabs.addTab(logs,'Log job')
-        self.history = table(['Mã job','Mã đơn','Người tạo','Mã mời','Trạng thái','Bean thực tế','Kết thúc'])
-        history_page=QWidget(); history_box=QVBoxLayout(history_page)
-        history_box.addWidget(QLabel('Hiển thị tối đa 500 job gần nhất. Xuất CSV để lấy toàn bộ lịch sử trên VPS.'))
-        history_box.addWidget(self.history)
-        actions=QHBoxLayout()
-        self.button('Xuất CSV lịch sử từ VPS',lambda:self.send('history.export',callback=
-            lambda r:self.save_text(r,'job_history.csv','CSV (*.csv)',bom=True)),actions)
-        history_box.addLayout(actions)
-        tabs.addTab(history_page,'Lịch sử job')
-        lookup = QWidget(); lookup_box = QVBoxLayout(lookup); lookup_form = QFormLayout()
-        self.lookup_email = QLineEdit(); self.lookup_password = QLineEdit()
-        self.lookup_password.setEchoMode(QLineEdit.EchoMode.Password)
-        lookup_form.addRow('Email Google',self.lookup_email); lookup_form.addRow('Mật khẩu',self.lookup_password)
-        lookup_box.addLayout(lookup_form); actions = QHBoxLayout()
-        self.button('Đăng nhập & lấy mã',self.lookup_start,actions)
-        self.button('Hủy',lambda:self.send('lookup.cancel'),actions)
-        self.button('Sao chép mã',self.copy_invite,actions,mutation=False)
-        self.button('Xuất CSV',self.export_profiles,actions,mutation=False)
-        lookup_box.addLayout(actions)
-        self.lookup_status = QLabel(); self.lookup_status.setWordWrap(True); lookup_box.addWidget(self.lookup_status)
-        self.profiles = table(['Email','ID tài khoản','Tên hiển thị','Mã mời','Beans','Cập nhật'])
-        lookup_box.addWidget(self.profiles)
-        tabs.addTab(lookup,'Lấy mã mời')
-        box.addWidget(tabs,1)
-        self.mochi_tabs = tabs
-        return page
+        from gui.remote_workspace import build_mochi
+        return build_mochi(self)
 
     def create_job(self):
+        self.save_job_draft(quiet=True)
         payload = dict(code=self.job_code.text().strip(),points=self.job_points.value(),
             customer=self.job_customer.text(),batch=self.job_batch.currentData() or '')
         if self.schedule.isChecked():
@@ -328,9 +204,9 @@ class RemoteMainWindow(QMainWindow):
             self.send(action,{key:value,**(extra or {})})
 
     def load_logs(self):
-        jid = self.selected(self.jobs,'job_id')
+        jid=self.selected(self.jobs,'job_id')
         if jid:
-            self.send('job.logs',{'job_id':jid},lambda r:(self.logs.setPlainText('\n'.join(r['lines'])),self.mochi_tabs.setCurrentIndex(2)))
+            self.open_job_logs(jid)
 
     def upload_batch(self):
         path,_ = QFileDialog.getOpenFileName(self,'Chọn lô mail đã mua','','JSON (*.json)')
@@ -380,25 +256,8 @@ class RemoteMainWindow(QMainWindow):
             self.status.setText('Chưa ghi được CSV. Kiểm tra file đang mở.')
 
     def build_proxy(self,pool):
-        page,box = self.page('Proxy Pool' if pool=='account' else 'Proxy mua mail')
-        provider = QComboBox(); provider.addItem('Proxy.vn','proxyvn'); provider.addItem('muaproxyxoay.net','muaproxyxoay')
-        box.addWidget(provider)
-        text = QPlainTextEdit(); text.setMaximumHeight(115)
-        text.setPlaceholderText('Mỗi dòng một proxy: ip:port|key_xoay hoặc ip:port:user:pass|key_xoay')
-        box.addWidget(text); actions = QHBoxLayout()
-        self.button('Thêm proxy',lambda:self.send('proxy.import',dict(pool=pool,provider=provider.currentData(),text=text.toPlainText()),lambda _:text.clear()),actions)
-        self.button('Nhập TXT',lambda:self.import_proxy_file(pool,provider),actions)
-        self.button('Kiểm tra tất cả',lambda:self.send('proxy.check',{'pool':pool}),actions)
-        self.button('Xuất TXT',lambda:self.send('proxy.export',{'pool':pool},
-            lambda r:self.save_text(r,'proxies.txt','TXT (*.txt)')),actions)
-        box.addLayout(actions)
-        listing = table(['ID','Proxy','Trạng thái','Nhà cung cấp','Tốc độ','Lỗi'])
-        setattr(self,'proxy_table_'+pool,listing)
-        box.addWidget(listing,1); actions = QHBoxLayout()
-        for caption,action in (('Kiểm tra','proxy.check'),('Đổi IP','proxy.rotate'),('Xóa','proxy.delete')):
-            self.button(caption,lambda _=False,a=action:self.selected_send(listing,'id',a,{'pool':pool}),actions)
-        box.addLayout(actions)
-        return page
+        from gui.remote_proxy import build_proxy_page
+        return build_proxy_page(self,pool)
 
     def save_text(self,result,name,file_filter,*,bom=False):
         path,_=QFileDialog.getSaveFileName(self,'Lưu dữ liệu từ VPS',name,file_filter)
@@ -428,92 +287,8 @@ class RemoteMainWindow(QMainWindow):
             self.send('proxy.import',dict(pool=pool,provider=provider.currentData(),text=text))
 
     def build_telegram(self):
-        page,box = self.page('Telegram')
-        tabs = QTabWidget(); box.addWidget(tabs)
-        users = QWidget(); users_box = QVBoxLayout(users)
-        self.users = table(['Chat ID','Tên','Vai trò','Cấp quyền','Job xong','Job lỗi','Bean','Doanh thu','Chi phí'])
-        users_box.addWidget(self.users)
-        form = QFormLayout(); self.user_id = QLineEdit(); self.user_name = QLineEdit()
-        self.user_role = QComboBox(); self.user_role.addItems(['partner','admin'])
-        for caption,field in (('Chat ID',self.user_id),('Tên',self.user_name),('Vai trò',self.user_role)):
-            form.addRow(caption,field)
-        self.user_gmail = QLineEdit(); self.user_gmail.setEchoMode(QLineEdit.EchoMode.Password)
-        self.user_trieu = QLineEdit(); self.user_trieu.setEchoMode(QLineEdit.EchoMode.Password)
-        form.addRow('API GmailVip riêng',self.user_gmail); form.addRow('API 1TrieuMail riêng',self.user_trieu)
-        users_box.addLayout(form); actions = QHBoxLayout()
-        self.button('Thêm / Lưu người dùng',self.save_user,actions)
-        self.button('Lưu 2 API riêng',self.save_user_keys,actions)
-        self.button('Thu hồi quyền',lambda:self.selected_send(self.users,'chat_id','user.active',{'active':False}),actions)
-        self.button('Khôi phục quyền',lambda:self.selected_send(self.users,'chat_id','user.active',{'active':True}),actions)
-        self.button('Xem job',lambda:self.selected_details(self.users,'chat_id','user.jobs'),actions)
-        users_box.addLayout(actions)
-        self.users.cellClicked.connect(self.pick_user)
-        tabs.addTab(users,'Người dùng')
-        bot = QWidget(); bot_box = QVBoxLayout(bot); form = QFormLayout()
-        self.bot_token = QLineEdit(); self.bot_token.setEchoMode(QLineEdit.EchoMode.Password)
-        self.bot_auto = QCheckBox('Tự bật bot khi dịch vụ VPS khởi động')
-        form.addRow('Bot Token (để trống giữ nguyên)',self.bot_token); form.addRow('',self.bot_auto)
-        bot_box.addLayout(form); actions = QHBoxLayout()
-        self.button('Lưu cấu hình bot',self.save_bot,actions)
-        self.button('Bật bot',lambda:self.send('telegram.start'),actions)
-        self.button('Tắt bot',lambda:self.send('telegram.stop'),actions)
-        bot_box.addLayout(actions)
-        self.bot_status = QLabel(); self.bot_status.setWordWrap(True); bot_box.addWidget(self.bot_status)
-        bot_box.addWidget(QLabel('Gửi thông báo đến admin / partner'))
-        self.broadcast = QPlainTextEdit(); bot_box.addWidget(self.broadcast)
-        actions = QHBoxLayout()
-        self.button('Gửi thông báo',lambda:self.send('telegram.broadcast',{'text':self.broadcast.toPlainText()}),actions)
-        self.button('Dừng gửi',lambda:self.send('telegram.cancel_broadcast'),actions)
-        bot_box.addLayout(actions)
-        self.broadcast_status = QLabel(); self.broadcast_status.setWordWrap(True); bot_box.addWidget(self.broadcast_status)
-        tabs.addTab(bot,'Bot và thông báo')
-        customers = QWidget(); customer_box = QVBoxLayout(customers)
-        self.customers = table(['Chat ID','Tên','Số dư khả dụng','Đơn đã tạo','Hoàn thành','Thất bại'])
-        customer_box.addWidget(self.customers)
-        self.customer_id = QLineEdit(); self.customer_id.setPlaceholderText('Chat ID để thêm / khôi phục')
-        customer_box.addWidget(self.customer_id); actions = QHBoxLayout()
-        self.button('Thêm / Khôi phục',lambda:self.numeric_send('customer.save','chat_id',self.customer_id),actions)
-        self.button('Xóa khách',lambda:self.selected_send(self.customers,'chat_id','customer.delete'),actions)
-        self.button('Xem ví / đơn',lambda:self.selected_details(self.customers,'chat_id','customer.history'),actions)
-        self.button('Sửa số dư',self.edit_balance,actions)
-        customer_box.addLayout(actions)
-        self.settle_id = QLineEdit(); self.settle_id.setPlaceholderText('Mã job gián đoạn đã kiểm tra log')
-        customer_box.addWidget(self.settle_id); actions = QHBoxLayout()
-        self.button('Chốt đơn gián đoạn',lambda:self.send('customer.settle',{'job_id':self.settle_id.text()}),actions)
-        customer_box.addLayout(actions)
-        tabs.addTab(customers,'Khách hàng')
-        sepay = QWidget(); sepay_box = QVBoxLayout(sepay); form = QFormLayout(); self.sepay_fields = {}
-        for key,caption in (('token','Token SePay v2 (để trống giữ nguyên)'),('bank_id','Bank Account ID (UUID)'),
-                ('account_number','Số tài khoản'),('bank_name','Tên ngân hàng'),('account_name','Chủ tài khoản')):
-            field = QLineEdit(); self.sepay_fields[key] = field
-            if key=='token':
-                field.setEchoMode(QLineEdit.EchoMode.Password)
-            form.addRow(caption,field)
-        self.sepay_auto = QCheckBox('Tự bật đồng bộ khi dịch vụ VPS khởi động')
-        form.addRow('',self.sepay_auto); sepay_box.addLayout(form); actions = QHBoxLayout()
-        self.button('Lưu SePay',self.save_sepay,actions)
-        self.button('Bật đồng bộ',lambda:self.send('sepay.start'),actions)
-        self.button('Tắt đồng bộ',lambda:self.send('sepay.stop'),actions)
-        sepay_box.addLayout(actions)
-        self.sepay_status = QLabel(); self.sepay_status.setWordWrap(True); sepay_box.addWidget(self.sepay_status)
-        self.transactions = table(['ID giao dịch','Chat ID','Số tiền','Nội dung','Trạng thái','Lý do'])
-        sepay_box.addWidget(self.transactions)
-        self.review_id = QLineEdit(); self.review_id.setPlaceholderText('Chat ID nhận giao dịch cần đối soát')
-        sepay_box.addWidget(self.review_id); actions = QHBoxLayout()
-        self.button('Đối soát giao dịch đã chọn',self.reconcile_sepay,actions)
-        sepay_box.addLayout(actions)
-        tabs.addTab(sepay,'Thanh toán SePay')
-        finance = QWidget(); finance_box = QVBoxLayout(finance); actions = QHBoxLayout()
-        self.button('Xem giao dịch / đối soát',lambda:self.send('finance.ledger',callback=self.details),actions)
-        finance_box.addLayout(actions); form = QFormLayout()
-        self.finance_id = QLineEdit(); self.finance_amount = QLineEdit()
-        form.addRow('Mã giao dịch / Job',self.finance_id); form.addRow('Số tiền VND',self.finance_amount)
-        finance_box.addLayout(form); actions = QHBoxLayout()
-        self.button('Chốt chi phí giao dịch',lambda:self.send('finance.reconcile',{'purchase_id':self.finance_id.text(),'amount':self.finance_amount.text()}),actions)
-        self.button('Bổ sung đơn giá job',lambda:self.send('finance.price',{'job_id':self.finance_id.text(),'amount':self.finance_amount.text()}),actions)
-        finance_box.addLayout(actions); finance_box.addStretch()
-        tabs.addTab(finance,'Tài chính')
-        return page
+        from gui.remote_telegram import build_telegram_page
+        return build_telegram_page(self)
 
     def pick_user(self,row,_):
         if 0<=row<len(self.users._rows):
@@ -586,31 +361,74 @@ class RemoteMainWindow(QMainWindow):
         save.clicked.connect(commit); dialog.exec()
 
     def build_settings(self):
-        page,box = self.page('Cài đặt chung trên VPS')
-        form = QFormLayout(); self.settings_fields = {}
-        provider = QComboBox()
-        for caption,value in (('GmailVip.vn','gmailvip_vn'),('1TrieuMail.com','1trieumail_com'),('Cả hai shop','multi_shop')):
-            provider.addItem(caption,value)
-        self.settings_fields['provider'] = provider; form.addRow('Nguồn mail',provider)
-        for key,caption in (('gmailvip_key','API GmailVip'),('one_trieu_key','API 1TrieuMail'),
-                            ('product_ids','Product IDs / Thứ tự ưu tiên'),('sale_rate','Giá bán VND / 100 bean')):
-            field = QLineEdit(); self.settings_fields[key] = field
-            if key.endswith('_key'):
-                field.setEchoMode(QLineEdit.EchoMode.Password)
-                field.setPlaceholderText('Để trống giữ key đã lưu trên VPS')
-            form.addRow(caption,field)
-        for key,caption,limit in (('concurrency','Số luồng Direct',50),('proxy_slots','Số luồng / proxy',50),('job_limit','Số job chạy cùng lúc',100)):
-            field = QSpinBox(); field.setRange(1,limit); self.settings_fields[key] = field; form.addRow(caption,field)
-        for key,caption in (('use_proxy','Sử dụng proxy'),('google_proxy','Google qua Proxy Pool'),
-                ('app_proxy','Đăng nhập Mochi qua Proxy Pool'),('redeem_proxy','Nhập mã qua Proxy Pool'),('mail_proxy','Mua mail qua Proxy mua mail')):
-            field = QCheckBox(caption); self.settings_fields[key] = field; form.addRow('',field)
-        box.addLayout(form)
-        self.settings_status = QLabel(); self.settings_status.setWordWrap(True); box.addWidget(self.settings_status)
-        actions = QHBoxLayout()
-        self.button('Lưu lên VPS',self.save_settings,actions)
-        self.button('Nạp lại cấu hình VPS',lambda:self.load_settings(self.snapshot),actions,mutation=False)
-        box.addLayout(actions); box.addStretch()
-        return page
+        from gui.remote_workspace import build_settings
+        return build_settings(self)
+
+    def switch_to_settings_tab(self):
+        self.activate(5)
+
+    def open_connection_settings(self):
+        self.activate(5)
+        self.settings_tabs.setCurrentIndex(0)
+        self.url.setFocus()
+
+    def open_new_job(self):
+        self.activate(1)
+        self.workspace_tabs.setCurrentIndex(0)
+        self.mochi_tabs.setCurrentIndex(0)
+
+    def open_job_logs(self,job_id):
+        if not job_id:
+            return
+        def display(result):
+            self._log_job_id=job_id
+            self.job_log_filter.setText('Job: '+job_id)
+            self.logs.setPlainText('\n'.join(result.get('lines',[])))
+            self.activate(1)
+            self.workspace_tabs.setCurrentIndex(0)
+            self.mochi_tabs.setCurrentIndex(2)
+        self.send('job.logs',{'job_id':job_id},display)
+
+    def save_job_draft(self,*,quiet=False):
+        draft=dict(code=self.job_code.text(),customer=self.job_customer.text(),points=self.job_points.value(),
+            scheduled=self.schedule.isChecked(),when=self.schedule_time.dateTime().toString('yyyy-MM-ddTHH:mm:ss'))
+        self.preferences.setValue('job/draft',json.dumps(draft,ensure_ascii=False))
+        if not quiet:
+            self.status.setText('Đã lưu nháp job trên máy tính.')
+
+    def restore_job_draft(self):
+        try:
+            draft=json.loads(str(self.preferences.value('job/draft','{}')))
+            self.job_code.setText(str(draft.get('code','')))
+            self.job_customer.setText(str(draft.get('customer','')))
+            points=draft.get('points',1000)
+            if type(points) is int:
+                self.job_points.setValue(points)
+            when=QDateTime.fromString(str(draft.get('when','')),'yyyy-MM-ddTHH:mm:ss')
+            if when.isValid():
+                self.schedule_time.setDateTime(when)
+            self.schedule.setChecked(draft.get('scheduled') is True)
+        except (ValueError,TypeError):
+            pass
+        self.update_job_quote()
+
+    def update_job_quote(self,*_):
+        count=(self.job_points.value()+99)//100
+        self.job_account_count.setText(f'(= {count:,} accounts)')
+        rate=self.snapshot.get('settings',{}).get('sale_rate','')
+        try:
+            amount=Decimal(str(rate))*count
+            if not amount.is_finite():
+                raise ValueError()
+            self.job_quote.setText(format(amount,',.2f').rstrip('0').rstrip('.'))
+        except (ValueError,ArithmeticError):
+            self.job_quote.clear()
+        self.job_start_button.setText('Tạo lịch job' if self.schedule.isChecked() else 'Bắt đầu nhập mã')
+        provider=self.snapshot.get('settings',{}).get('provider','')
+        names={'gmailvip_vn':'GmailVip.vn','1trieumail_com':'1TrieuMail.com','multi_shop':'Cả hai shop'}
+        batch=self.job_batch.currentData()
+        source=('Lô mail đã mua: '+str(batch)) if batch else 'Nguồn mua mail: '+names.get(provider,'chưa kết nối VPS')
+        self.job_source_summary.setText(source+' · Cấu hình mail, proxy và số luồng được quản lý tại Cài đặt chung.')
 
     def save_settings(self):
         values = {}
@@ -634,36 +452,86 @@ class RemoteMainWindow(QMainWindow):
         self.sepay_auto.setChecked(payment.get('enabled',False))
         for key,value in payment.get('fields',{}).items():
             self.sepay_fields[key].setText(value)
+        self.update_job_quote()
 
     def render(self,response):
-        state = response.get('state',{})
+        from gui.remote_workspace import format_time
+        state=response.get('state',{})
         if state.get('version')!=1:
-            self.failure('Phiên bản dịch vụ VPS không tương thích.'); self.enable_actions(False); return
-        self.snapshot = state
-        self.enable_actions(True)
+            self.failure('Phiên bản dịch vụ VPS không tương thích.')
+            self.enable_actions(False)
+            return
+        self.snapshot=state
+        self._connected=True
+        self.enable_actions(not state.get('closing',False))
+        self.btn_connection.setText('●  Đã kết nối VPS')
+        self.btn_connection.setStyleSheet('text-align:left;background:transparent;border:none;color:#34d399;padding:8px 5px;font-size:11px;')
         self.status.setText('Đã kết nối VPS · '+datetime.now().strftime('%H:%M:%S'))
-        self.dashboard_summary.setText(f"Đang chạy: {state['active_jobs']} / {state['job_limit']} job     "
-            f"Đang chờ: {state['queued_jobs']}     Hẹn giờ: {state['scheduled_jobs']}\n"
-            f"Proxy Pool: {len(state['proxies'])}     Proxy mua mail: {len(state['mail_proxies'])}")
-        fill(self.dashboard_jobs,state['jobs'],['job_id','invite_code','creator_name','status','success_count','target_count'])
-        fill(self.jobs,state['jobs'],['job_id','customer_name','creator_name','invite_code','status','success_count','target_count','scheduled_at'])
-        fill(self.history,state['history'],['job_id','order_id','creator_name','invite_code','status','achieved_beans','finished_at'])
-        fill(self.proxy_table_account,state['proxies'],['id','endpoint','status','provider','speed','error'])
-        fill(self.proxy_table_mail,state['mail_proxies'],['id','endpoint','status','provider','speed','error'])
-        users = [{**row,'revenue':str(Decimal(row['revenue_units'])/100),'cost':str(Decimal(row['cost_units'])/100)} for row in state['users']]
-        fill(self.users,users,['chat_id','name','role','active','completed_jobs','failed_jobs','sold_beans','revenue','cost'])
-        customers = [{**row,'balance':str(Decimal(row['balance_units'])/100)} for row in state['customers']]
-        fill(self.customers,customers,['chat_id','name','balance','total_orders','completed_orders','failed_orders'])
-        payments = [{**row,'amount':str(Decimal(row['amount_units'])/100)} for row in state['sepay']['transactions']]
-        fill(self.transactions,payments,['transaction_id','chat_id','amount','content','state','reason'])
-        self.bot_status.setText(state['telegram']['status']); self.broadcast_status.setText(state['telegram']['broadcast'])
-        self.sepay_status.setText(state['sepay']['status']); self.lookup_status.setText(state['lookup']['status'])
+        records=state.get('jobs',[])
+        failed={'Thất bại','Mã không hợp lệ','Mã mời lỗi','Đạt giới hạn 24h'}
+        values=dict(total=len(records),active=state['active_jobs']+state['queued_jobs']+state['scheduled_jobs'],
+            completed=sum(r.get('status')=='Hoàn thành' for r in records),
+            failed=sum(r.get('status') in failed for r in records),
+            beans=sum(max(0,r.get('success_count',0))*100 for r in records),
+            proxies=sum(r.get('status')!='FAILED' for r in state['proxies']))
+        for key,value in values.items():
+            self.dashboard_metrics[key].setText(f'{value:,}')
+        self.btn_proxy_pill.setText(f"●  {values['proxies']} proxy sẵn sàng" if values['proxies'] else '○  Chưa có proxy')
+        self.dashboard_summary.setText(f"Đang chờ: {state['queued_jobs']} · Hẹn giờ: {state['scheduled_jobs']}")
+        self.job_queue_label.setText(f"Đang chạy: {state['active_jobs']} / {state['job_limit']} job · "
+            f"Đang chờ: {state['queued_jobs']} · Hẹn giờ: {state['scheduled_jobs']}")
+        display=[{**r,'customer_display':r.get('customer_name') or r['job_id'],
+            'progress':f"{r.get('success_count',0)} / {r.get('target_count',0)}",
+            'beans':f"{r.get('success_count',0)*100:,} / {r.get('target_count',0)*100:,}",
+            'beans_actual':f"{r.get('success_count',0)*100:,}",
+            'time_display':format_time(r.get('scheduled_at') or r.get('created_at'))}
+            for r in records]
+        recent=list(reversed(display))[:10]
+        fill(self.dashboard_jobs,recent,['customer_display','invite_code','progress','beans_actual','status','time_display'],identity_key='job_id')
+        self.dashboard_empty.setVisible(not recent)
+        for old_row in range(self.jobs.rowCount()):
+            cell=self.jobs.cellWidget(old_row,7)
+            if cell is not None:
+                cell.hide()
+                self.jobs.removeCellWidget(old_row,7)
+        fill(self.jobs,display,['customer_display','creator_name','invite_code','progress','beans','status','time_display','actions'],identity_key='job_id')
+        self._job_row_buttons=[]
+        terminal={'Hoàn thành','Thất bại','Đã hủy','Mã không hợp lệ','Mã mời lỗi','Đạt giới hạn 24h'}
+        for row,record in enumerate(display):
+            actions=QWidget()
+            actions.setStyleSheet('background:transparent;')
+            layout=QHBoxLayout(actions)
+            layout.setContentsMargins(4,3,4,3);layout.setSpacing(4)
+            for caption,callback,allowed in (
+                ('Dừng',lambda _=False,jid=record['job_id']:self.send('job.stop',{'job_id':jid}),record.get('status') not in terminal),
+                ('Log',lambda _=False,jid=record['job_id']:self.open_job_logs(jid),True)):
+                button=QPushButton(caption)
+                button.setStyleSheet('padding:4px 8px;font-size:11px;')
+                button.clicked.connect(callback)
+                button.setEnabled(allowed and not self._mutating and not self._closing and not state.get('closing',False))
+                self._job_row_buttons.append((button,allowed))
+                layout.addWidget(button)
+            self.jobs.setCellWidget(row,7,actions)
+        labels={'completed':'Hoàn thành','failed':'Thất bại','cancelled':'Đã hủy',
+                'invalid_code':'Mã không hợp lệ','invite_limit_reached':'Đạt giới hạn 24h'}
+        history=[{**r,'status':labels.get(r.get('status'),r.get('status','')),
+                  'finished_display':format_time(r.get('finished_at'))} for r in state['history']]
+        fill(self.history,history,['job_id','order_id','creator_name','invite_code','status','achieved_beans','finished_display'])
+        self.proxy_views['account'].update_rows(state['proxies'])
+        self.proxy_views['mail'].update_rows(state['mail_proxies'])
+        self.telegram_presentation.refresh(state)
+        active_users=sum(r.get('active',False) and r.get('chat_id',0)>0 for r in state['users'])
+        self.dashboard_telegram.setText(f"{active_users} người dùng được cấp quyền · "+
+            ('Bot đang nhận yêu cầu' if state['telegram'].get('ready') else 'Bot chưa nhận yêu cầu'))
+        self.lookup_status.setText(state['lookup']['status'])
         fill(self.profiles,state['lookup']['profiles'],['email','user_id','display_name','invite_code','beans','updated_at'])
-        config = state['settings']
+        config=state['settings']
         self.settings_status.setText('API GmailVip: '+('đã lưu' if config['has_gmailvip_key'] else 'chưa có')+
             ' · API 1TrieuMail: '+('đã lưu' if config['has_one_trieu_key'] else 'chưa có'))
         if not self._config_loaded:
-            self.load_settings(state); self._config_loaded = True
+            self.load_settings(state)
+            self._config_loaded=True
+        self.update_job_quote()
 
     def closeEvent(self,event):
         self._closing = True

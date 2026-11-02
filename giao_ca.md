@@ -1,5 +1,9 @@
 # Biên Bản Giao Ca & Nhật Ký Phát Triển Dự Án (Giao_ca.md)
 
+> **03/11/2026 — giao diện quản lý VPS trở lại bố cục tool cũ:** logo/thanh bên,
+> Dashboard, tab Mochi, biểu mẫu hai cột, bảng proxy và ba tab Telegram đã được
+> khôi phục. Kết nối tại **Cài đặt chung → Hạ tầng chung**; tác vụ vẫn trên VPS.
+
 > **02/11/2026 — chuyển sang VPS Ubuntu và quản lý từ Windows:** hướng dẫn mới tại
 > [docs/VPS_UBUNTU.md](docs/VPS_UBUNTU.md). Launcher mặc định mở trình quản lý VPS;
 > `--local` mở bản cũ. Không áp dụng mô tả “100% Local” lịch sử cho chế độ VPS.
@@ -475,4 +479,43 @@ Quy trình phát triển và hoàn thiện công cụ trải qua 8 vòng lặp (
   CLI qua mã thiết bị. Đã đối chiếu hash local/remote; repo không chứa dữ liệu
   vận hành hoặc token quản lý. `/opt/hoshino/app` có Git metadata để cập nhật
   bằng pull; dữ liệu nằm riêng. Không lưu mật khẩu SSH trong mã hoặc tài liệu.
+
+### Khôi phục giao diện tool cũ cho trình quản lý VPS — 03/11/2026
+
+- `RemoteMainWindow` vẫn là API client. Tách phần trình bày thành
+  `gui/remote_shell.py`, `remote_workspace.py`, `remote_widgets.py`,
+  `remote_proxy.py`, `remote_telegram.py`, đồng bộ cùng các bản `src/gui/`.
+  Không tạo MochiChatPage/ProxyPage/TelegramPage, runner hoặc SQLite vận hành
+  trên máy tính. Banner dùng widget trình bày riêng, tránh import package
+  `gui.pages` vốn nạp kèm controller local.
+- Thanh bên 220px dùng logo và tài nguyên branding cũ, nhóm TỔNG QUAN/NỀN TẢNG/
+  HỆ THỐNG, biểu tượng, mục chọn màu xanh, nhãn proxy và trạng thái VPS phía dưới.
+  Mở mặc định Mochi Chat. URL/token/nút kết nối chuyển vào Cài đặt chung/Hạ tầng
+  chung; bấm nhãn VPS trên thanh bên để tới ngay phần kết nối.
+- Dashboard có banner, sáu thẻ thống kê, 10 job gần nhất và truy cập nhanh. Mochi
+  có Nhiệm vụ/Kho tài khoản/Lấy mã mời; Nhiệm vụ giữ Thiết lập job/Job đang chạy/
+  Log job/Lịch sử job. Form job hai cột, thẻ loại job, lưu nháp, hẹn giờ và nút
+  Bắt đầu nhập mã. Tổng tiền dự kiến chỉ đọc, tính theo đơn giá VPS, không thêm
+  giá nhập tay bị bỏ qua. Chọn lô và tải JSON lên VPS tại Kho tài khoản.
+- Hai trang proxy có bốn thẻ thống kê, tìm kiếm, TXT/Dán proxy, bảng hoạt động/lỗi
+  tách riêng và nút thao tác từng dòng. Lưu TXT ghi đúng file đã chọn, Xuất TXT
+  tạo bản sao. Telegram giữ ba tab cũ, thẻ bot/thông báo, thống kê người dùng và
+  tài chính, bảng 10 cột gồm lợi nhuận, API riêng, khách hàng/SePay/đối soát.
+- Render giữ lựa chọn theo job_id/chat_id/id/email/transaction_id; xóa lựa chọn
+  khi bản ghi biến mất hoặc bị lọc, tránh thao tác nhầm người/job. Polling giữ
+  bản nháp của các editor. Dashboard và nút Log từng dòng gắn đúng job_id, mở
+  inner tab2. Khóa cả nút từng dòng khi offline/busy/VPS closing; sau POST lỗi
+  chờ poll xác nhận lại trạng thái trước khi cho gửi lệnh tiếp.
+- Giao diện xem tại1280×900 và kích thước tối thiểu1120×760. Preview mô phỏng tại
+  `.tmp/restored_mochi.png`, `restored_dashboard.png`, `restored_proxy.png`,
+  `restored_telegram.png`, `restored_settings.png`, `restored_mail_settings.png`.
+  Đã kết nối giao diện mới với VPS thật qua SSH và đọc snapshot thành công;
+  không tạo job/mua mail/đăng nhập/gửi bot/giao dịch thật để thử.
+- Kiểm thử mới `tests/test_remote_classic_ui.py` bao phủ lựa chọn theo ID, filter,
+  giữ editor khi polling, callback Log, payload lịch+batch, khóa khi closing và
+  mất phản hồi POST. Các thay đổi chỉ thuộc client/tài liệu, không yêu cầu
+  khởi động lại dịch vụ VPS hoặc thay đổi protocol/dữ liệu.
+- Full regression Windows712 ca qua; sau đó chạy lại classic13 ca sau chặn POST
+  chưa xác nhận (tổng713 ca riêng biệt). Ubuntu chạy lại classic13 + remote26 +
+  hoshino_ui17 đều qua. Sáu module GUI mới và bản `src/` giống byte-for-byte.
 

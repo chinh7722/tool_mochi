@@ -5,6 +5,10 @@
 > API đi qua SSH tunnel. Dùng `main_mochi_gui.py --local` để mở bản local cũ.
 > Các mô tả “100% cục bộ” bên dưới thuộc kiến trúc trước khi thêm chế độ VPS.
 
+> **03/11/2026 — giao diện quản lý VPS giống tool cũ:** khôi phục logo/thanh bên,
+> Dashboard, biểu mẫu job hai cột, các tab Mochi, bảng proxy và ba tab Telegram.
+> Kết nối VPS tại **Cài đặt chung → Hạ tầng chung**; xử lý vẫn chạy trên VPS.
+
 > Thêm [Mochi Chat → Lấy mã mời](LAY_MA_MOI_TAI_KHOAN_2026-11-02.md): nhập email/mật khẩu Google để thu thập mã mời, tên hiển thị và số dư beans của tài khoản, kèm ID và giờ cập nhật. Có lưu danh sách, sao chép mã và xuất CSV; không lưu mật khẩu/token. Đối chiếu API với `mochi-api-analysis` và XAPK 1.3.2/build38, dùng `remainingQuota` để đọc beans.
 
 > Thêm [ô gửi thông báo hàng loạt cho admin/partner](THONG_BAO_TELEGRAM_2026-11-02.md): **Telegram → Người dùng và bot → Gửi thông báo đến admin / partner**. Bật bot, nhập nội dung và bấm Gửi thông báo. Có số người nhận, bộ đếm độ dài, tiến độ thành công/lỗi/bỏ qua và Dừng gửi; chỉ gửi tới các ID đang được cấp quyền.

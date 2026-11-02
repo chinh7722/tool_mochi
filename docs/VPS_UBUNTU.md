@@ -24,9 +24,22 @@ job, không polling Telegram và không mở cơ sở dữ liệu vận hành lo
 
 1. Chạy `Open_VPS_Tunnel.bat`, đăng nhập SSH và giữ cửa sổ mở.
 2. Chạy `Launch_HoshinoTool.bat` hoặc `Launch_VPS_Manager.bat`.
-3. Nhập token quản lý, bấm **Kết nối VPS**. URL mặc định: `http://127.0.0.1:8765`.
+3. Vào **Cài đặt chung → Hạ tầng chung → Kết nối VPS**, nhập token rồi bấm
+   **Kết nối VPS**. Có thể bấm nhãn kết nối ở cuối thanh bên để mở nhanh.
+   URL mặc định: `http://127.0.0.1:8765`.
 4. Nhập cấu hình tại **Cài đặt chung**, nhập proxy tại hai trang proxy riêng,
    cấu hình bot/SePay tại **Telegram**. Các API key để trống khi sửa sẽ được giữ nguyên.
+
+Giao diện quản lý dùng lại bố cục hoshino-tool cũ: thanh bên có logo/nhóm điều
+hướng, Dashboard sáu thẻ, Mochi với **Nhiệm vụ / Kho tài khoản / Lấy mã mời**,
+biểu mẫu job hai cột và bốn tab job. Hai trang proxy có thống kê và bảng hoạt
+động/lỗi riêng. Telegram có ba tab **Người dùng và bot / Quản lý khách hàng /
+Thanh toán SePay**. Các thao tác đều gửi tới VPS; mở giao diện này không khởi
+chạy job, bot hoặc cơ sở dữ liệu vận hành trên máy tính.
+
+Ô **Tổng tiền dự kiến** trong thiết lập job chỉ đọc và tính theo đơn giá đã lưu
+trên VPS; đơn giá thực tế được chốt khi tạo job. **Lưu nháp** giữ các trường job
+trên máy tính, không tạo job. Polling trạng thái không ghi đè cấu hình đang nhập.
 
 VPS hiện dùng SSH `root1@sv50.pcrender.net`, cổng `20052`. Launcher không chứa
 mật khẩu SSH. Nếu triển khai đã tạo `data/remote_connection.json`, ứng dụng tự đọc
