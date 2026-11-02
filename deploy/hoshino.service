@@ -1,0 +1,28 @@
+[Unit]
+Description=Hoshino Mochi worker and management API
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=hoshino
+Group=hoshino
+WorkingDirectory=/opt/hoshino/app
+EnvironmentFile=/etc/hoshino/runtime.env
+Environment=QT_QPA_PLATFORM=offscreen
+Environment=HOSHINO_DATA_DIR=/var/lib/hoshino
+Environment=PLAYWRIGHT_BROWSERS_PATH=/var/lib/hoshino/browsers
+ExecStart=/opt/hoshino/venv/bin/python -I /opt/hoshino/app/main_mochi_server.py --data-dir /var/lib/hoshino --port 8765
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=360
+KillMode=control-group
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/hoshino
+
+[Install]
+WantedBy=multi-user.target

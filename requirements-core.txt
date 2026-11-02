@@ -1,0 +1,3 @@
+# Clean platform-specific wheels; never copy bundled Windows DLLs to Linux.
+curl_cffi==0.17.0
+playwright==1.64.1
