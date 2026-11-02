@@ -7,6 +7,7 @@ Usage example:
 import argparse
 import os
 import sys
+import uuid
 
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8")
@@ -27,6 +28,8 @@ from core.config.constants import required_mochi_invitation_accounts
 from core.job_events import JobLogEvent, JobLogLevel, JobProgressEvent
 from core.platforms.mochichat.runners.invite_referral import MochiInviteRunner
 from core.browser import browser_manager
+from core.config.paths import data_directory
+from core.platforms.mochichat.invite_quota import InviteQuotaStore
 
 
 def main():
@@ -72,12 +75,13 @@ def main():
         mail_provider_api_key=args.api_key,
         mail_product_ids=args.product_ids,
         browser_headless=not args.no_headless,
+        invite_quota_store=InviteQuotaStore(data_directory()/'invite_quota.sqlite3'),
     )
 
     async def execute():
         try:
             return await runner.run(
-            job_id="cli_job",
+            job_id='cli_'+uuid.uuid4().hex,
             invite_code=invite_code,
             target_count=target_count,
             )

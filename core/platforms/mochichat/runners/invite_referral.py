@@ -7,7 +7,7 @@ Hoạt động hoàn toàn ở LOCAL, không phụ thuộc Cloudflare Worker.
 
 import asyncio
 from collections.abc import Callable, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 import logging
 import time
 from typing import Any, List, Optional, Tuple, Union
@@ -21,6 +21,7 @@ from core.mail.providers.priority import MULTI_SHOP, GMAILVIP, ONE_TRIEU, buy_pr
 from core.mail.batch_inventory import save_reserved_batch, write_batch, load_batch, update_batch, reserve_batch
 from core.platforms.mochichat.device import DeviceInfo
 from core.platforms.mochichat.fetcher import MochiChatFetcher, MochiRedeemResult
+from core.platforms.mochichat.invite_quota_lock import invite_code_guard
 from core.proxy.broker import ProxyBroker
 from core.proxy.client import ProxyPoolClient
 from core.proxy.models import ProxyModel
@@ -95,6 +96,7 @@ class MochiInviteRunner:
         mail_api_keys: Optional[dict] = None,
         mail_proxy_pool=None,
         probe_invite_first: bool = True,
+        invite_quota_store=None,
     ):
         self.cloud_client = cloud_client
         self.proxy_client = proxy_client
@@ -117,6 +119,7 @@ class MochiInviteRunner:
         self.mail_purchase_sink = mail_purchase_sink
         self.mail_proxy_pool=mail_proxy_pool
         self.probe_invite_first=probe_invite_first
+        self.invite_quota_store=invite_quota_store
         self.mail_batch_path = None
         self.purchased_accounts = ()
         self._purchased_batch_lock = None
@@ -214,7 +217,59 @@ class MochiInviteRunner:
             return bool(self.cancel_event)
         return False
 
-    async def run(
+    def _quota_snapshot(self,code):
+        if self.invite_quota_store is None:
+            return None
+        try:
+            return self.invite_quota_store.snapshot(code)
+        except Exception:
+            raise RuntimeError('Không đọc được bộ đếm lượt nhập mã; dừng job, chưa mua thêm mail.') from None
+
+    def _quota_message(self,snapshot):
+        from core.job_schedule import schedule_text
+        message=f'Mã mời bị giới hạn 24 giờ: đã có {snapshot.count}/10 lượt nhập thành công trong 24 giờ gần nhất.'
+        if snapshot.next_available_at:
+            message+=' Có lượt trống trở lại từ '+schedule_text(snapshot.next_available_at)+'.'
+        return message
+
+    def _record_quota_success(self,job_id,code,item,result):
+        if not result.success or self.invite_quota_store is None or result.data.get('_quota_recorded'):
+            return result
+        try:
+            self.invite_quota_store.record_success(code,job_id,item.identifier)
+            return replace(result,data={**result.data,'_quota_recorded':True})
+        except Exception:
+            # The service accepted the redeem. Preserve it for partial billing,
+            # but never continue buying after losing the durable quota record.
+            return replace(result,data={**result.data,'quota_tracking_error':True,'stop_job':True})
+
+    async def run(self,job_id,invite_code,target_count,accounts=None,job_name=None,customer_name=None,
+            unit_price=0,continued_from_job_id=None,initial_success_count=0,source_mail_batch=None):
+        arguments=dict(job_id=job_id,invite_code=invite_code,target_count=target_count,accounts=accounts,
+            job_name=job_name,customer_name=customer_name,unit_price=unit_price,
+            continued_from_job_id=continued_from_job_id,initial_success_count=initial_success_count,
+            source_mail_batch=source_mail_batch)
+        if self.invite_quota_store is None:
+            return await self._run_owned(**arguments)
+        started=False
+        try:
+            async with invite_code_guard(self.invite_quota_store,invite_code,cancelled=self._is_cancelled,
+                    on_wait=lambda:self._emit_log(job_id,'Mã mời đang được job khác xử lý; chờ đối chiếu lượt trước khi mua mail.')):
+                started=True
+                return await self._run_owned(**arguments)
+        except asyncio.CancelledError:
+            if started:
+                raise
+            return MochiInviteJobSummary(job_id,str(invite_code).strip().upper(),target_count,0,
+                max(0,min(initial_success_count,target_count)),0,0,'cancelled',(),
+                'Đã hủy trong khi chờ job cùng mã mời.')
+        except Exception as exc:
+            self._emit_log(job_id,'Không đối chiếu được bộ đếm mã mời; dừng trước khi mua thêm mail.',level=JobLogLevel.ERROR)
+            return MochiInviteJobSummary(job_id,str(invite_code).strip().upper(),target_count,0,
+                max(0,min(initial_success_count,target_count)),0,0,'failed',(),
+                'Không đối chiếu được bộ đếm mã mời; kiểm tra dữ liệu trên VPS.')
+
+    async def _run_owned(
         self,
         job_id: str,
         invite_code: str,
@@ -263,6 +318,15 @@ class MochiInviteRunner:
         source_batch_lock = None
 
         try:
+            quota=self._quota_snapshot(clean_code)
+            if quota is not None:
+                self._emit_log(job_id,f'Mã mời [{clean_code}]: {quota.count}/10 lượt thành công trong 24 giờ gần nhất, còn {quota.remaining} lượt.')
+                if quota.limit_reached and base_success_count<target_count:
+                    message=self._quota_message(quota)
+                    self._emit_log(job_id,message,level=JobLogLevel.WARNING)
+                    self._emit_progress(job_id,target_count,0,base_success_count,0,'invite_limit_reached',error_message=message)
+                    return MochiInviteJobSummary(job_id,clean_code,target_count,0,base_success_count,0,0,
+                        'invite_limit_reached',(),message)
             if source_mail_batch is not None:
                 source_batch_lock = reserve_batch(source_mail_batch)
                 current_accounts = load_batch(source_mail_batch)
@@ -343,6 +407,7 @@ class MochiInviteRunner:
         success_count = initial_success_count
         failure_count = already_redeemed_count = attempted_count = consecutive_failures = 0
         terminal_status = None
+        quota_tracking_failed=False
         cancelled = False
         provided = list(accounts) if accounts is not None else None
         account_idx = 0
@@ -359,6 +424,17 @@ class MochiInviteRunner:
             provider_type = OneTrieuMail if '1trieu' in self.mail_provider else GmailVipVn
             amount=(1 if probe_mode and purchase_round==0 else
                 target_count-success_count-len(remaining_spares) if probe_mode else target_count-initial_success_count)
+            quota=self._quota_snapshot(clean_code)
+            if quota is not None:
+                if quota.limit_reached:
+                    terminal_status='invite_limit_reached'
+                    error_msg=self._quota_message(quota)
+                    return None
+                amount=min(amount,max(0,quota.remaining-len(remaining_spares)))
+                if amount<=0:
+                    provided=list(remaining_spares)
+                    account_idx=1
+                    return provided[0] if provided else None
             route=('qua Proxy mua mail riêng' if self.mail_proxy_pool is not None and self.mail_via_proxy else
                 'qua proxy' if assigned_proxy and self.mail_via_proxy else 'bằng mạng trực tiếp')
             action='mua 1 mail để thử mã mời trước' if probe_mode and purchase_round==0 else f'mua lô còn lại {amount} tài khoản Gmail'
@@ -407,6 +483,7 @@ class MochiInviteRunner:
             nonlocal success_count, failure_count, already_redeemed_count, attempted_count
             nonlocal consecutive_failures, terminal_status, error_msg, account_idx, provided
             nonlocal probe_passed
+            nonlocal quota_tracking_failed
             if self._is_cancelled() or terminal_status:
                 return
             item = None
@@ -423,7 +500,7 @@ class MochiInviteRunner:
             try:
                 if item is None and self.mail_proxy_pool is not None and self.mail_via_proxy:
                     item=await buy_accounts()
-                    if self._is_cancelled():
+                    if self._is_cancelled() or terminal_status or item is None:
                         return
                 needs_proxy = any((self.mail_via_proxy if provided is None and self.mail_proxy_pool is None else False,
                     self.google_login_via_proxy, self.app_login_via_proxy, self.redeem_via_proxy))
@@ -534,6 +611,7 @@ class MochiInviteRunner:
 
                 result = await self._process_account(job_id, clean_code, item, assigned_proxy, task_ident,
                     recover_proxy=recover_proxy if assigned_proxy else None)
+                result=self._record_quota_success(job_id,clean_code,item,result)
                 results.append(result)
                 succeeded = result.success
                 outcome = ProxyReleaseOutcome.SUCCESS if succeeded else ProxyReleaseOutcome.BUSINESS_FAILURE
@@ -554,6 +632,10 @@ class MochiInviteRunner:
                     consecutive_failures = 0
                     if probe_mode and purchase_round==0:
                         probe_passed=True
+                    if result.data.get('quota_tracking_error'):
+                        quota_tracking_failed=True
+                        terminal_status='failed'
+                        error_msg='Đã nhập mã thành công nhưng chưa ghi được bộ đếm lượt nhập; dừng để đối soát, không mua thêm mail.'
                 elif result.status == 'already_redeemed':
                     already_redeemed_count += 1
                     consecutive_failures += 1
@@ -594,10 +676,16 @@ class MochiInviteRunner:
         progress()
         try:
             while success_count < target_count and not self._is_cancelled() and not terminal_status:
+                quota=self._quota_snapshot(clean_code)
+                if quota is not None and quota.limit_reached and not active_tasks:
+                    terminal_status='invite_limit_reached'
+                    error_msg=self._quota_message(quota)
+                    break
                 if probe_mode and purchase_round==0 and probe_passed and not active_tasks:
                     purchase_round=1
-                    remaining_spares=list(self.purchased_accounts[1:])[:target_count-success_count]
-                    if len(remaining_spares)>=target_count-success_count:
+                    goal=min(target_count-success_count,quota.remaining) if quota is not None else target_count-success_count
+                    remaining_spares=list(self.purchased_accounts[1:])[:goal]
+                    if len(remaining_spares)>=goal:
                         provided=remaining_spares
                     else:
                         provided=None
@@ -611,6 +699,8 @@ class MochiInviteRunner:
                 # Outstanding tasks already reserve part of the remaining target.
                 available = min(self.current_concurrency() - len(active_tasks),
                     target_count - success_count - len(active_tasks))
+                if quota is not None:
+                    available=min(available,quota.remaining-len(active_tasks))
                 if provided is not None:
                     available = min(available, len(provided) - account_idx)
                 else:
@@ -637,7 +727,9 @@ class MochiInviteRunner:
             if self.proxy_client:
                 await self.proxy_client.release_job(job_id, platform_id='mochichat')
 
-        if success_count >= target_count:
+        if quota_tracking_failed:
+            final_status='failed'
+        elif success_count >= target_count:
             final_status = 'completed'
         elif cancelled or self._is_cancelled():
             final_status = 'cancelled'
@@ -696,6 +788,7 @@ class MochiInviteRunner:
                 account=item.identifier,
             )
 
+        confirmed_result=None
         try:
             # Step 1 & 2: Local Google login + Mochi backend login
             login_res = await fetcher.login(
@@ -735,7 +828,11 @@ class MochiInviteRunner:
             route = 'qua proxy' if fetcher.proxy and self.redeem_via_proxy else 'bằng mạng trực tiếp'
             _on_step(3, f"🎁 Đang gửi yêu cầu nhập mã mời [{invite_code}] {route}...")
             redeem_res = await fetcher.redeem_invite_code(invite_code)
-            return self._parse_redeem_result(item.identifier, redeem_res)
+            result=self._parse_redeem_result(item.identifier, redeem_res)
+            result=self._record_quota_success(job_id,invite_code,item,result)
+            if result.success:
+                confirmed_result=result
+            return result
 
         except Exception as ex:
             logger.exception(f"Ngoại lệ khi xử lý account {item.identifier}: {ex}")
@@ -747,8 +844,20 @@ class MochiInviteRunner:
                 message=f"Lỗi kết nối/ngoại lệ: {ex}",
             )
         finally:
-            await fetcher.close()
-            await browser_manager.release_by_owner(owner_id)
+            try:
+                try:
+                    await fetcher.close()
+                except (Exception,asyncio.CancelledError):
+                    if confirmed_result is None:
+                        raise
+                    self._emit_log(job_id,'Đã xác nhận nhập mã thành công; có lỗi khi đóng phiên tài khoản.',level=JobLogLevel.WARNING)
+            finally:
+                try:
+                    await browser_manager.release_by_owner(owner_id)
+                except (Exception,asyncio.CancelledError):
+                    if confirmed_result is None:
+                        raise
+                    self._emit_log(job_id,'Đã xác nhận nhập mã thành công; có lỗi khi dọn trình duyệt.',level=JobLogLevel.WARNING)
 
     def _parse_redeem_result(
         self, identifier: str, res: MochiRedeemResult

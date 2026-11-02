@@ -110,6 +110,7 @@ from core.platforms.mochichat.runners.invite_referral import (
     MochiInviteJobSummary,
     MochiInviteRunner,
 )
+from core.platforms.mochichat.invite_quota import InviteQuotaStore
 from core.proxy.broker import ProxyBroker, proxy_maintenance
 from core.proxy.client import ProxyPoolClient
 from core.proxy.models import ProxyModel
@@ -403,6 +404,12 @@ class MochiChatPage(QWidget):
         history_directory=(Path(self.settings.fileName()).parent
             if self.settings.format()==QSettings.Format.IniFormat else base/'data')
         self.job_history_store=JobHistoryStore(history_directory/'job_history.csv')
+        self.invite_quota_store=None
+        self._invite_quota_error=''
+        try:
+            self.invite_quota_store=InviteQuotaStore(history_directory/'invite_quota.sqlite3')
+        except Exception:
+            self._invite_quota_error='Không mở được bộ đếm lượt nhập mã. Chưa khởi chạy hoặc mua mail.'
 
         # Load persisted settings
         self.config = MochiChatConfig.from_settings(self.settings)
@@ -1464,6 +1471,46 @@ class MochiChatPage(QWidget):
             self.mail_purchase_recorder(receipt)
         self.mail_purchase_recorded.emit(receipt)
 
+    def _invite_quota_snapshot(self,code):
+        if self._invite_quota_error or self.invite_quota_store is None:
+            raise RuntimeError(self._invite_quota_error or
+                'Chưa sẵn sàng bộ đếm lượt nhập mã. Chưa khởi chạy hoặc mua mail.')
+        return self.invite_quota_store.snapshot(code)
+
+    def _finish_invite_quota_job(self,code,points,target_accs,customer,total_vnd,registrar,
+            creator,chat_id,quota,scheduled_record=None):
+        """Register a normal terminal result without constructing paid resources."""
+        job_id=scheduled_record.job_id if scheduled_record else f'mochi_{uuid.uuid4().hex[:8]}'
+        registrar=registrar or self.local_job_registrar
+        if registrar is not None and scheduled_record is None:
+            try:
+                if not registrar(job_id,code,points,target_accs):
+                    self._set_validation_message('Yêu cầu này đã có job; không tạo thêm job trùng.')
+                    return None
+            except Exception:
+                self._set_validation_message('Không lưu được chủ sở hữu và lịch sử job. Chưa khởi chạy hoặc mua mail.')
+                return None
+        record=scheduled_record or _MochiJobSessionRecord(job_id,code,target_accs,
+            customer_name=customer,status='Đạt giới hạn 24h',creator_name=creator,creator_chat_id=chat_id)
+        record.status='Đạt giới hạn 24h'
+        record.total_vnd=total_vnd
+        self._session_jobs[job_id]=record
+        self._selected_job_id=job_id
+        self._set_validation_message('')
+        self._render_jobs_table()
+        self._update_action_buttons_state()
+        when=(quota.next_available_at.astimezone(VIETNAM_TIME).strftime('%d/%m/%Y %H:%M:%S')
+            if quota.next_available_at is not None else '')
+        message=f'Mã mời đã có {quota.count}/10 lượt nhập thành công trong 24 giờ; không mua mail để thử.'
+        if when:
+            message+=' Có lượt khả dụng từ '+when+' (giờ Việt Nam).'
+        self._append_log_line(message,color='#f59e0b',job_id=job_id)
+        summary=MochiInviteJobSummary(job_id,code,target_accs,0,0,0,0,
+            'invite_limit_reached',(),message)
+        # Telegram's job/owner mapping is installed after this method returns.
+        QTimer.singleShot(0,lambda:self._on_job_finished(summary))
+        return job_id
+
     def _on_start_clicked(self, *, code=None, points=None, customer_name=None, before_start=None,
             creator_name='Local', creator_chat_id=None, scheduled_at=None, _scheduled_record=None,
             mail_api_keys=None):
@@ -1509,6 +1556,15 @@ class MochiChatPage(QWidget):
                 before_start, creator_name, creator_chat_id)
         if _scheduled_record is not None:
             total_vnd = _scheduled_record.total_vnd
+        try:
+            quota=self._invite_quota_snapshot(code)
+        except Exception:
+            self._set_validation_message(self._invite_quota_error or
+                'Không đọc được bộ đếm lượt nhập mã. Chưa khởi chạy hoặc mua mail.')
+            return None
+        if quota.limit_reached:
+            return self._finish_invite_quota_job(code,points,target_accs,customer_name,total_vnd,
+                before_start,creator_name,creator_chat_id,quota,_scheduled_record)
         accounts = None
         source_mail_batch = None
         use_mail_batch = bool(_scheduled_record.source_mail_batch) if _scheduled_record else self.chk_use_mail_batch.isChecked()
@@ -1678,6 +1734,7 @@ class MochiChatPage(QWidget):
             redeem_via_proxy=redeem_via_proxy,
             mail_purchase_sink=self._record_mail_purchase if self.mail_purchase_recorder is not None else None,
             mail_proxy_pool=mail_proxy_pool,
+            invite_quota_store=self.invite_quota_store,
         )
         if mail_proxy_pool is not None:
             mail_proxy_pool.on_wait=lambda message:runner._emit_log(job_id,message)

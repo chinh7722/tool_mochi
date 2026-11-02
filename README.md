@@ -1,5 +1,10 @@
 # hoshino-tool — Mochi Chat, Proxy Pool & Telegram
 
+> **[Giới hạn mã mời 24 giờ](GIOI_HAN_MA_MOI_24H_2026-11-03.md):** cộng mọi lượt nhập
+> thành công theo mã, kể cả trong job lỗi/hủy. Đủ10 lượt trong24h gần nhất trả
+> giới hạn ngay, không mua mail thử. Còn ít lượt chỉ mua phần quota còn lại;
+> giữ bộ đếm khi mở lại và nhập lịch sử thành công cũ một lần.
+
 > **Chế độ VPS Ubuntu + quản lý Windows:** xem [hướng dẫn triển khai](docs/VPS_UBUNTU.md).
 > Launcher mặc định mở trình quản lý VPS; tác vụ chạy trong dịch vụ `hoshino` trên Ubuntu.
 > API đi qua SSH tunnel. Dùng `main_mochi_gui.py --local` để mở bản local cũ.

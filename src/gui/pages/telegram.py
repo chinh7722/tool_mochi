@@ -80,6 +80,15 @@ class TelegramPage(QWidget):
                 else base / 'data')
             user_store = TelegramUserStore(directory / 'telegram_users.sqlite3')
         self.store = user_store
+        # Seed before restoring schedules or auto-starting bot/SePay workers.
+        # Detailed success events are idempotent and never added twice on restart.
+        try:
+            if mochi_page.invite_quota_store is None:
+                raise RuntimeError('Quota store unavailable')
+            mochi_page.invite_quota_store.seed_legacy_jobs(self.store.invite_quota_history())
+        except Exception:
+            mochi_page._invite_quota_error=(
+                'Không khôi phục được bộ đếm lượt nhập mã từ lịch sử. Chưa khởi chạy hoặc mua mail.')
         mochi_page.mail_purchase_recorder = self.store.record_purchase
         mochi_page.local_job_registrar = self._register_local_job
         mochi_page.job_order_lookup = self.store.get_customer_order_for_job
@@ -100,6 +109,8 @@ class TelegramPage(QWidget):
         self._broadcast_last = None
         self._broadcast_recipient_count = 0
         self._build_ui()
+        if mochi_page._invite_quota_error:
+            self.lbl_status.setText(mochi_page._invite_quota_error)
         self._render_users()
         try:
             archived={entry.job_id for entry in mochi_page.job_history_store.read()}

@@ -1,5 +1,9 @@
 # Biên Bản Giao Ca & Nhật Ký Phát Triển Dự Án (Giao_ca.md)
 
+> **03/11/2026 — bộ đếm lượt nhập thành công theo mã:** đủ10 lượt trong24h trượt
+> trả giới hạn ngay trước mua mail. Tính cả lượt trong job lỗi/hủy, dùng chung
+> mọi người tạo job. Chi tiết [hướng dẫn](GIOI_HAN_MA_MOI_24H_2026-11-03.md).
+
 > **03/11/2026 — giao diện quản lý VPS trở lại bố cục tool cũ:** logo/thanh bên,
 > Dashboard, tab Mochi, biểu mẫu hai cột, bảng proxy và ba tab Telegram đã được
 > khôi phục. Kết nối tại **Cài đặt chung → Hạ tầng chung**; tác vụ vẫn trên VPS.
@@ -539,4 +543,36 @@ Quy trình phát triển và hoàn thiện công cụ trải qua 8 vòng lặp (
 - Xác minh với snapshot VPS thật:26 job, job mới nhất ở đầu, polling tiếp tục.
   Không tạo job vận hành hoặc chạy shop/bot thật khi thử. Chỉ đổi client/tests/
   tài liệu, không thay API hoặc restart dịch vụ đang xử lý.
+
+### Bộ đếm 10 lượt nhập thành công / mã / 24 giờ — 03/11/2026
+
+- Thêm `invite_quota.py`: SQLite gồm xác nhận thành công theo mã chuẩn hóa,
+  job_id, hash tài khoản và thời điểm UTC. Cửa sổtrượt24h, đúng biên hết hạn;
+  dedup từng mã/job/tài khoản. Lượt đã thành công không bị xóa theo trạng thái
+  cuối job, nên completed/failed/cancelled đều được tính. Không cộng login,
+  lượt lỗi hoặc already_redeemed. Thêm khóa file và threading theo mã để các
+  job cùng mã không cùng mua phần quota cuối, kể cả khác thread/event loop.
+- Runner nhận `invite_quota_store`, kiểm tra khi thực sự bắt đầu trước mọi
+  mua/proxy và trước từng đợt mua/dispatch. Đủ10 trả invite_limit_reached không
+  probe. Còn9 mà target10 chỉ mua1, thành công ghi1 chojob mới rồi dừnglimit;
+  không cộng9lượt cũ thành bean của job mới. Cap số mail và tác vụ theo phần
+  quota còn lại, giữ luồng1+phầncònthiếu khi còn đủ quota.
+- Ghi thành công ngay sau phản hồi redeem trước cleanup; có fallback idempotent
+  cho custom account processor. Cleanup lỗi không làm mất lượt đã xác nhận.
+  Lỗi đọc bộ đếm chặn trước mua, lỗi ghi sau redeem giữ success để tính tiền
+  nhưng dừng mua/chạy tiếp. Không đặt quota thành0 khi DB lỗi.
+- GUI luôn khởi tạo store cạnh INI/history và truyền chung vào runner. Mã đủ
+  quota đi nhánh kết thúc ngay trước dựng worker/kiểm tra shop/proxy, vẫn đăng
+  ký owner và phát summary qua QTimer để Telegram kịp gắn origin. Khách hoàn
+  hold đúng một lần. Lịch tương lai vẫn đặt được, kiểm tra khi đến giờ.
+- Startup seed mọi jobs.success_count>0, khônglọc trạng thái, một lần mỗi job.
+  Legacy thiếu timestamp từng lượt nên dùng finalized_at/updated_at/created_at
+  theo thứtự để tránh hết hạn sớm; mới ghi chính xác từnglượt. Không cộng trùng
+  sau restart; baseline job cũ và lượt xác nhận mới được cộng riêng.
+- CLI dùng store thư mục dữ liệu và job_id UUID mỗi lần. Hướng dẫn đầy đủ tại
+  `GIOI_HAN_MA_MOI_24H_2026-11-03.md`. File nguồn và `src/` đã đồng bộ.
+- Thêm quota27 + runner15 + UI10 ca; full Windows770 ca PASS, chạy lại runner15
+  sau chỉnh cờ trackingfailure qua. Ubuntu quota27/runner15/UI10 qua. Mô phỏng
+  read-only dữ liệu hiện có:19job cósuccess,11 mã,102lượttrong24h,10mã đã đủ10.
+  Không mua mail, đăng nhập hoặc nhập mã thật để thử.
 

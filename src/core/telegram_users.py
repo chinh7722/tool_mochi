@@ -556,6 +556,13 @@ class TelegramUserStore(CustomerAccountsMixin):
                     FROM mail_purchases GROUP BY job_id) p ON p.job_id=j.job_id
                 WHERE j.chat_id=? ORDER BY j.created_at DESC, j.job_id DESC''', (owner_id,)))
 
+    def invite_quota_history(self):
+        """All confirmed successes, independent of final status or job owner."""
+        with self._connection() as connection:
+            return tuple(dict(row) for row in connection.execute('''SELECT job_id,code,
+                success_count,created_at,updated_at,finalized_at FROM jobs
+                WHERE success_count>0 ORDER BY created_at,job_id'''))
+
     def finished_job_history(self):
         """Export finalized legacy jobs without inferring missing job/customer names."""
         with self._connection() as connection:
