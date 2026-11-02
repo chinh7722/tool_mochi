@@ -197,6 +197,13 @@ class RuntimeTests(unittest.TestCase):
         self.assertNotIn(b'private-gmail-key',encode(r.state()))
         self.assertEqual(r.telegram.store.get_user_mail_keys(444)['gmailvip_vn'],'private-gmail-key')
 
+    def test_editing_revoked_user_does_not_restore_access(self):
+        r=self.runtime
+        r.command('user.save',{'chat_id':444,'name':'Partner','role':'partner'})
+        r.command('user.active',{'chat_id':444,'active':False})
+        r.command('user.save',{'chat_id':444,'name':'Renamed','role':'admin'})
+        self.assertFalse(r.telegram.store.get_user(444).active)
+
     def test_uploaded_batch_has_safe_server_path_and_is_reusable(self):
         r=self.runtime
         response=r.command('batch.upload',{'accounts':[{'email':'test@example.com','password':'private-batch-pass'}]})

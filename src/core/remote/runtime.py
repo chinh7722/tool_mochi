@@ -278,7 +278,9 @@ class Runtime:
         role = text_field(data,'role',maximum=20,default='partner')
         if role not in ('admin','partner'):
             raise RemoteError('Vai trò không hợp lệ.')
-        self.telegram.store.upsert_user(chat_id,text_field(data,'name',maximum=120),role)
+        existing=self.telegram.store.get_user(chat_id)
+        self.telegram.store.upsert_user(chat_id,text_field(data,'name',maximum=120),role,
+            active=existing.active if existing is not None else True)
         self.refresh_users()
 
     def do_user_active(self, data):
