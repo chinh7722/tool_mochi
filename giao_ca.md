@@ -471,6 +471,8 @@ Quy trình phát triển và hoàn thiện công cụ trải qua 8 vòng lặp (
   đè dữ liệu VPS. Nếu chuyển lịch/lô cũ, đóng bản local và đổi đường dẫn lô từ
   Windows sang đường dẫn VPS theo hướng dẫn trước khi bật bot/lịch.
 - Repository mục tiêu `chinh7722/tool_mochi`: source đã được commit trong checkout
-  trên VPS; push cần phiên GitHub có quyền ghi. Xác minh trạng thái push thực tế
-  trước khi nói mã đã được xuất bản. Không lưu mật khẩu SSH trong mã hoặc tài liệu.
+  trên VPS và push thành công lên nhánh `main` sau khi người dùng đăng nhập GitHub
+  CLI qua mã thiết bị. Đã đối chiếu hash local/remote; repo không chứa dữ liệu
+  vận hành hoặc token quản lý. `/opt/hoshino/app` có Git metadata để cập nhật
+  bằng pull; dữ liệu nằm riêng. Không lưu mật khẩu SSH trong mã hoặc tài liệu.
 

@@ -124,11 +124,14 @@ cài requirements nếu thay đổi, chạy kiểm thử rồi khởi động l�
 
 ```bash
 sudo systemctl stop hoshino
-# cập nhật mã đã kiểm tra tại /opt/hoshino/app
+sudo git -C /opt/hoshino/app pull --ff-only origin main
 sudo /opt/hoshino/venv/bin/python -m pip install -r /opt/hoshino/app/requirements.txt
 sudo systemctl start hoshino
 sudo journalctl -u hoshino -n 80 --no-pager
 ```
+
+Nếu repository chuyển sang private, cấu hình quyền đọc GitHub cho tài khoản
+triển khai trước khi pull; không nhúng token vào URL remote.
 
 ## Phạm vi kiểm chứng
 
