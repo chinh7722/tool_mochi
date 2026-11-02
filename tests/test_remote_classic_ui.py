@@ -235,6 +235,44 @@ class ClassicRemoteUiTests(unittest.TestCase):
         self.assertTrue(all(not button.isEnabled() for button in self.window._mutation_buttons))
         self.assertTrue(all(not button.isEnabled() for button in self.window.proxy_views['account']._inline_buttons))
 
+    def test_combo_draft_survives_restart_and_submits_full_target(self):
+        w=self.window
+        w.job_code.setText('COMBO1')
+        w.job_points.setValue(5500)
+        w.job_combo.setChecked(True)
+        w.save_job_draft(quiet=True)
+        other=self.new_window()
+        self.assertTrue(other.job_combo.isChecked())
+        self.assertEqual(other.job_points.value(),5500)
+        self.assertEqual(other.job_start_button.text(),'Bắt đầu combo')
+        other.send=self.send
+        other.create_job()
+        self.assertEqual(self.calls,[('job.create',dict(code='COMBO1',points=5500,customer='',batch='',combo=True))])
+
+    def test_waiting_combo_shows_accumulated_progress_schedule_and_cancel(self):
+        state=deepcopy(self.state)
+        waiting=job('combo-one',status='Chờ lượt combo')
+        waiting.update(combo=True,target_count=55,success_count=20,attempted_count=22,
+            scheduled_at='2030-04-05T09:35:00+07:00')
+        state['jobs']=[job('newest-terminal',status='Hoàn thành'),waiting]
+        state['scheduled_jobs']=1
+        self.render(state)
+        self.assertEqual(self.window.jobs._rows[0]['job_id'],'combo-one')
+        self.assertEqual(self.window.jobs.item(0,3).text(),'20 / 55')
+        self.assertEqual(self.window.jobs.item(0,4).text(),'2,000 / 5,500')
+        self.assertIn('Combo',self.window.jobs.item(0,0).text())
+        self.assertIn('Tiếp: 05/04 09:35',self.window.jobs.item(0,6).text())
+        buttons=self.window.jobs.cellWidget(0,7).findChildren(QPushButton)
+        stop=next(button for button in buttons if button.text()=='Dừng')
+        self.assertTrue(stop.isEnabled())
+        stop.click()
+        self.assertEqual(self.calls,[('job.stop',{'job_id':'combo-one'})])
+
+    def test_polling_preserves_unsaved_combo_choice(self):
+        self.window.job_combo.setChecked(True)
+        self.render(deepcopy(self.state))
+        self.assertTrue(self.window.job_combo.isChecked())
+
     def test_constructor_and_snapshot_never_start_operational_store_or_worker(self):
         with patch.object(sqlite3,'connect',side_effect=AssertionError('No local operational database')), \
              patch('gui.remote_window.RequestWorker.start',side_effect=AssertionError('No implicit remote request')):

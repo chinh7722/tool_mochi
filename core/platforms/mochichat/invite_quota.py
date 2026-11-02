@@ -128,6 +128,16 @@ class InviteQuotaStore:
                     break
         return InviteQuotaSnapshot(code, count, max(0, INVITE_LIMIT - count), next_time, blocked)
 
+    def job_success_count(self, code, job_id):
+        """All confirmed successes of one durable job, including expired days."""
+        code = normalize_invite_code(code)
+        job_id = _identifier(job_id, 'Mã job', 256)
+        with closing(sqlite3.connect(self.path, timeout=10)) as db:
+            return db.execute('''SELECT
+                (SELECT COUNT(*) FROM invite_successes WHERE code=? AND job_id=?) +
+                COALESCE((SELECT success_count FROM invite_legacy_jobs WHERE code=? AND job_id=?),0)''',
+                (code,job_id,code,job_id)).fetchone()[0]
+
     def seed_legacy_jobs(self, rows):
         """Import aggregate successes once, before enabling newly tracked workers.
 

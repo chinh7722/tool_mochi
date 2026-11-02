@@ -53,7 +53,7 @@ class Runtime:
             jobs.append({key: getattr(record, key, None) for key in (
                 'job_id', 'invite_code', 'customer_name', 'creator_name', 'creator_chat_id',
                 'status', 'target_count', 'success_count', 'failure_count', 'attempted_count',
-                'created_at', 'scheduled_at')})
+                'created_at', 'scheduled_at', 'combo')})
         def proxies(page):
             rows = []
             for item in list(page._proxies.values())[:2000]:
@@ -117,6 +117,9 @@ class Runtime:
             raise RemoteError('Mã mời không hợp lệ.')
         points = integer(data, 'points', maximum=1_000_000)
         customer = text_field(data, 'customer', maximum=120)
+        combo = data.get('combo', False)
+        if type(combo) is not bool:
+            raise RemoteError('Chế độ combo phải là giá trị bật hoặc tắt.')
         when = data.get('scheduled_at')
         if when:
             when = schedule_time(text_field(data, 'scheduled_at', maximum=80), future=True)
@@ -130,7 +133,7 @@ class Runtime:
                 raise RemoteError('Lô mail không có trên VPS.')
             m.input_mail_batch.setText(str(path))
         m.chk_use_mail_batch.setChecked(bool(batch))
-        jid = m._on_start_clicked(code=code, points=points, customer_name=customer, scheduled_at=when)
+        jid = m._on_start_clicked(code=code, points=points, customer_name=customer, scheduled_at=when, combo=combo)
         if not jid:
             raise RemoteError(m.validation_label.text() or 'Chưa tạo được job; kiểm tra cấu hình VPS.')
         self.settings.sync()

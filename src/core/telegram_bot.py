@@ -84,6 +84,7 @@ class TelegramJobRequest:
     points: int
     customer: str = ''
     scheduled_at: str | None = None
+    combo: bool = False
 
 
 @dataclass(frozen=True)
@@ -110,6 +111,7 @@ class TelegramCustomerRequest:
     customer: str = ''
     scheduled_at: str | None = None
     job_id: str = ''
+    combo: bool = False
 
 
 def parse_control_command(text, chat_id, role, update_id):
@@ -148,7 +150,8 @@ def parse_control_command(text, chat_id, role, update_id):
 def parse_job_command(text):
     parts = text.strip().split(maxsplit=3)
     if len(parts) < 3 or not re.fullmatch(r'[A-Za-z0-9_-]{1,64}', parts[1]):
-        raise ValueError('Cú pháp: /job MÃ_MỜI SỐ_KẸO [TÊN_KHÁCH]. Ví dụ: /job VBRN5H 1000')
+        command = '/combo' if parts and parts[0].lower().split('@', 1)[0] == '/combo' else '/job'
+        raise ValueError(f'Cú pháp: {command} MÃ_MỜI SỐ_BEAN [TÊN_KHÁCH]. Ví dụ: {command} VBRN5H 1000')
     if not re.fullmatch(r'[0-9]{1,7}', parts[2]):
         raise ValueError('Số kẹo phải là số nguyên dương, tối đa 1.000.000.')
     points = int(parts[2])
@@ -214,6 +217,7 @@ class TelegramBotService:
     HELP = ('Lệnh tạo job: /job MÃ_MỜI SỐ_KẸO [TÊN_KHÁCH]\n'
         '/mailapi KEY_GMAILVIP KEY_1TRIEUMAIL: lưu đủ 2 API mua mail riêng. /mailapi: xem trạng thái đã nhập.\n'
         'Ví dụ: /job VBRN5H 1000 Khách A\n'
+        'Combo: /combo MÃ_MỜI SỐ_BEAN [TÊN_KHÁCH]; đạt giới hạn ngày sẽ tự tiếp tục sau 24 giờ 1 phút đến khi đủ bean.\n'
         'Hẹn giờ: /hen MÃ_MỜI SỐ_BEAN DD/MM/YYYY HH:MM [TÊN_KHÁCH] (giờ Việt Nam).\n'
         '/lich: xem lịch. /huy MÃ_JOB: hủy lịch/job chưa chạy của bạn.\n'
         '/id: xem chat ID. /stats: xem thống kê của bạn.\n'
@@ -285,13 +289,14 @@ class TelegramBotService:
                 if base in ('/lich','/schedules','/huy','/cancel'):
                     control = parse_control_command(text, chat_id, None, update_id)
                     request = TelegramCustomerRequest(update_id,chat_id,control.action,name,job_id=control.job_id)
-                elif base in ('/job','/addjob','/hen','/schedule'):
+                elif base in ('/job','/addjob','/hen','/schedule','/combo'):
                     if base in ('/hen','/schedule'):
                         code,points,customer,when = parse_scheduled_job_command(text)
                     else:
                         code,points,customer = parse_job_command(text)
                         when = None
-                    request = TelegramCustomerRequest(update_id,chat_id,'job',name,code,points,customer,when)
+                    request = TelegramCustomerRequest(update_id,chat_id,'job',name,code,points,customer,when,
+                        combo=base == '/combo')
                 else:
                     request = TelegramCustomerRequest(update_id,chat_id,actions.get(base,'help'),name)
                 self.pending.add(update_id)
@@ -326,7 +331,7 @@ class TelegramBotService:
             except Exception:
                 self.pending.discard(update_id)
                 self.reply(chat_id, 'Không chuyển được lệnh quản lý tới tool.')
-        elif base in ('/job', '/addjob', '/hen', '/schedule'):
+        elif base in ('/job', '/addjob', '/hen', '/schedule', '/combo'):
             try:
                 if base in ('/hen','/schedule'):
                     code, points, customer, when = parse_scheduled_job_command(text)
@@ -340,7 +345,7 @@ class TelegramBotService:
                 self.reply(chat_id, 'Tool đang bận nhận yêu cầu; vui lòng thử lại sau.')
                 return
             self.pending.add(update_id)
-            request = TelegramJobRequest(update_id, chat_id, code, points, customer, when)
+            request = TelegramJobRequest(update_id, chat_id, code, points, customer, when, combo=base == '/combo')
             try:
                 self.on_job(request)
             except Exception:

@@ -1,4 +1,4 @@
-"""One-time job schedules in Vietnam time, without credentials in saved metadata."""
+"""Job schedules in Vietnam time, without credentials in saved metadata."""
 from datetime import datetime, timedelta, timezone
 import json
 
@@ -23,13 +23,13 @@ def schedule_text(value):
 
 
 def schedule_storage(value=None, data=None):
-    if value is None:
-        return None, '{}'
-    data = data or {}
-    allowed = {'customer_name', 'creator_name', 'total_vnd', 'source_mail_batch'}
+    data = {} if data is None else data
+    allowed = {'customer_name', 'creator_name', 'total_vnd', 'source_mail_batch', 'combo'}
     if not isinstance(data, dict) or set(data) - allowed:
         raise ValueError('Thông tin lịch job không hợp lệ.')
+    if 'combo' in data and type(data['combo']) is not bool:
+        raise ValueError('Chế độ combo phải là giá trị bật hoặc tắt.')
     payload = json.dumps(data, ensure_ascii=False)
     if len(payload) > 16000:
         raise ValueError('Thông tin lịch job quá dài.')
-    return schedule_time(value).isoformat(), payload
+    return schedule_time(value).isoformat() if value is not None else None, payload

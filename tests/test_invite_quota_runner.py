@@ -77,6 +77,30 @@ class InviteQuotaRunnerTests(unittest.IsolatedAsyncioTestCase):
         runner._process_account.assert_not_called()
         self.assertEqual(self.store.snapshot('TEST').count,10)
 
+    async def test_combo_55_successes_over_six_windows_only_buys_remaining_quota(self):
+        clock = [datetime.now(timezone.utc)]
+        snapshot,record = self.store.snapshot,self.store.record_success
+        def confirm(code,job_id,account_identifier,**kwargs):
+            return record(code,job_id,account_identifier,occurred_at=clock[0])
+        with patch.object(self.store,'snapshot',side_effect=lambda code:snapshot(code,now=clock[0])), \
+             patch.object(self.store,'record_success',side_effect=confirm):
+            completed = 0
+            for index in range(6):
+                result = await self.runner().run('durable-combo','TEST',55,initial_success_count=completed)
+                completed = result.success_count
+                self.assertEqual(completed,min(55,(index+1)*10))
+                self.assertEqual(result.status,'completed' if index==5 else 'invite_limit_reached')
+                self.assertEqual(result.attempted_count,5 if index==5 else 10)
+                if index < 5:
+                    purchases = list(self.requests)
+                    blocked = await self.runner().run('durable-combo','TEST',55,initial_success_count=completed)
+                    self.assertEqual((blocked.status,blocked.success_count,blocked.attempted_count),
+                        ('invite_limit_reached',completed,0))
+                    self.assertEqual(self.requests,purchases)
+                clock[0] += timedelta(hours=24,minutes=1)
+        self.assertEqual(self.requests,[1,9]*5+[1,4])
+        self.assertEqual(self.store.job_success_count('test','durable-combo'),55)
+
     async def test_nine_existing_successes_buy_only_one_and_next_job_buys_none(self):
         self.seed(9)
         result=await self.runner().run('one-slot','TEST',10)

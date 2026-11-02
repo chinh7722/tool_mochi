@@ -16,7 +16,7 @@ from core.config.constants import MOCHI_INVITATION_REWARD_POINTS
 from core.finance import MailPurchaseReceipt, MAX_MONEY_UNITS
 from core.customer_accounts import CustomerAccountsMixin
 from core.job_history import JOB_TIMEZONE, JobHistoryEntry
-from core.job_schedule import schedule_storage
+from core.job_schedule import schedule_storage, schedule_time
 from core.mail.user_keys import validated_user_mail_keys
 from core.mail.providers.priority import GMAILVIP, ONE_TRIEU
 
@@ -610,6 +610,53 @@ class TelegramUserStore(CustomerAccountsMixin):
             return tuple(dict(row) for row in connection.execute('''SELECT j.*,u.name AS owner_name
                 FROM jobs j JOIN users u ON u.chat_id=j.chat_id
                 WHERE j.dispatch_state='scheduled' AND j.finalized_at IS NULL ORDER BY j.scheduled_at,j.created_at'''))
+
+    def reschedule_combo_job(self, jobid, when, success_count, attempted_count=0, failure_count=0):
+        """Save the next round without closing the job or settling its customer hold."""
+        jobid = _text(jobid, 'Mã job', 120)
+        when = schedule_time(when).isoformat()
+        success_count = _count(success_count, 'Số thành công')
+        attempted_count = _count(attempted_count, 'Số đã thử')
+        failure_count = _count(failure_count, 'Số lỗi')
+        with self._connection(write=True) as connection:
+            row = connection.execute('''SELECT * FROM jobs
+                WHERE job_id=? AND finalized_at IS NULL''', (jobid,)).fetchone()
+            if row is None or json.loads(row['schedule_data']).get('combo') is not True:
+                return False
+            # A duplicate completion callback must not postpone a saved round.
+            if (row['dispatch_state'] == 'scheduled' and row['scheduled_at'] is not None
+                    and success_count <= row['success_count']
+                    and attempted_count <= row['attempted_count']
+                    and failure_count <= row['failure_count']):
+                return True
+            connection.execute('''UPDATE jobs SET dispatch_state='scheduled', scheduled_at=?,
+                success_count=MAX(success_count, ?), attempted_count=MAX(attempted_count, ?),
+                failure_count=MAX(failure_count, ?), updated_at=?
+                WHERE job_id=? AND finalized_at IS NULL''',
+                (when, success_count, attempted_count, failure_count, _now(), jobid))
+            return True
+
+    def recover_combo_jobs(self, now=None):
+        """Requeue unfinished combo rounds after an exclusive runtime restart.
+
+        Call only before workers are started. Already saved future rounds retain
+        their deadline; interrupted rounds become due now and recheck quota.
+        """
+        when = schedule_time(now if now is not None else datetime.now(timezone.utc))
+        recovered = 0
+        with self._connection(write=True) as connection:
+            rows = connection.execute('''SELECT job_id,schedule_data,scheduled_at FROM jobs
+                WHERE finalized_at IS NULL AND dispatch_state IN ('queued','running','dispatching')''').fetchall()
+            for row in rows:
+                data = json.loads(row['schedule_data'])
+                if not isinstance(data, dict) or data.get('combo') is not True:
+                    continue
+                saved = schedule_time(row['scheduled_at']) if row['scheduled_at'] else when
+                connection.execute('''UPDATE jobs SET dispatch_state='scheduled',scheduled_at=?,updated_at=?
+                    WHERE job_id=? AND finalized_at IS NULL''',
+                    (max(saved, when).isoformat(), _now(), row['job_id']))
+                recovered += 1
+        return recovered
 
     def defer_queued_schedule(self, jobid):
         jobid = _text(jobid, 'Mã job', 120)

@@ -229,6 +229,8 @@ class RemoteMainWindow(QMainWindow):
         self.save_job_draft(quiet=True)
         payload = dict(code=self.job_code.text().strip(),points=self.job_points.value(),
             customer=self.job_customer.text(),batch=self.job_batch.currentData() or '')
+        if self.job_combo.isChecked():
+            payload['combo'] = True
         if self.schedule.isChecked():
             payload['scheduled_at'] = self.schedule_time.dateTime().toString('yyyy-MM-ddTHH:mm:ss')+'+07:00'
         self.send('job.create',payload,self.job_created)
@@ -437,7 +439,8 @@ class RemoteMainWindow(QMainWindow):
 
     def save_job_draft(self,*,quiet=False):
         draft=dict(code=self.job_code.text(),customer=self.job_customer.text(),points=self.job_points.value(),
-            scheduled=self.schedule.isChecked(),when=self.schedule_time.dateTime().toString('yyyy-MM-ddTHH:mm:ss'))
+            scheduled=self.schedule.isChecked(),when=self.schedule_time.dateTime().toString('yyyy-MM-ddTHH:mm:ss'),
+            combo=self.job_combo.isChecked())
         self.preferences.setValue('job/draft',json.dumps(draft,ensure_ascii=False))
         if not quiet:
             self.status.setText('Đã lưu nháp job trên máy tính.')
@@ -454,6 +457,7 @@ class RemoteMainWindow(QMainWindow):
             if when.isValid():
                 self.schedule_time.setDateTime(when)
             self.schedule.setChecked(draft.get('scheduled') is True)
+            self.job_combo.setChecked(draft.get('combo') is True)
         except (ValueError,TypeError):
             pass
         self.update_job_quote()
@@ -469,7 +473,9 @@ class RemoteMainWindow(QMainWindow):
             self.job_quote.setText(format(amount,',.2f').rstrip('0').rstrip('.'))
         except (ValueError,ArithmeticError):
             self.job_quote.clear()
-        self.job_start_button.setText('Tạo lịch job' if self.schedule.isChecked() else 'Bắt đầu nhập mã')
+        self.job_start_button.setText('Tạo lịch combo' if self.schedule.isChecked() and self.job_combo.isChecked()
+            else 'Tạo lịch job' if self.schedule.isChecked()
+            else 'Bắt đầu combo' if self.job_combo.isChecked() else 'Bắt đầu nhập mã')
         provider=self.snapshot.get('settings',{}).get('provider','')
         names={'gmailvip_vn':'GmailVip.vn','1trieumail_com':'1TrieuMail.com','multi_shop':'Cả hai shop'}
         batch=self.job_batch.currentData()
@@ -526,11 +532,12 @@ class RemoteMainWindow(QMainWindow):
         self.dashboard_summary.setText(f"Đang chờ: {state['queued_jobs']} · Hẹn giờ: {state['scheduled_jobs']}")
         self.job_queue_label.setText(f"Đang chạy: {state['active_jobs']} / {state['job_limit']} job · "
             f"Đang chờ: {state['queued_jobs']} · Hẹn giờ: {state['scheduled_jobs']}")
-        display=[{**r,'customer_display':r.get('customer_name') or r['job_id'],
+        display=[{**r,'customer_display':(r.get('customer_name') or r['job_id'])+(' · Combo' if r.get('combo') else ''),
             'progress':f"{r.get('success_count',0)} / {r.get('target_count',0)}",
             'beans':f"{r.get('success_count',0)*100:,} / {r.get('target_count',0)*100:,}",
             'beans_actual':f"{r.get('success_count',0)*100:,}",
-            'time_display':format_time(r.get('scheduled_at') or r.get('created_at'))}
+            'time_display':('Tiếp: ' if r.get('combo') and r.get('status')=='Chờ lượt combo' else '')
+                +format_time(r.get('scheduled_at') or r.get('created_at'))}
             for r in records]
         recent=list(reversed(display))[:10]
         fill(self.dashboard_jobs,recent,['customer_display','invite_code','progress','beans_actual','status','time_display'],identity_key='job_id')

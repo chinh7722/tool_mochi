@@ -576,3 +576,36 @@ Quy trình phát triển và hoàn thiện công cụ trải qua 8 vòng lặp (
   read-only dữ liệu hiện có:19job cósuccess,11 mã,102lượttrong24h,10mã đã đủ10.
   Không mua mail, đăng nhập hoặc nhập mã thật để thử.
 
+### Combo mã mời qua nhiều đợt — 03/11/2026
+
+- Thêm checkbox Combo tại Thiết lập job của remote Windows và giao diện local;
+  API `job.create` nhận boolean `combo`, state công khai cờ combo và lịch tiếp.
+  Bot nhận `/combo MÃ_MỜI SỐ_BEAN [TÊN_KHÁCH]` cho admin/partner và khách hàng.
+  Hướng dẫn tại `COMBO_MA_MOI_2026-11-03.md`; có lưu nháp và kết hợp hẹn giờ đầu.
+- Combo giữ cùng job_id, target, chủ sở hữu, đơn giá và đơn khách. Mỗi worker
+  nhận `initial_success_count` tổng đã đạt, chỉ chạy phần còn thiếu. Attempt/lỗi
+  của từng đợt được cộng với baseline; progress, CSV và quyết toán dùng số tổng.
+  Chỉ ghi kết quả cuối/CSV khi hoàn thành, hủy hoặc lỗi cần kiểm tra.
+- Giới hạn 24h chuyển sang `Chờ lượt combo`, lưu lịch sau 24h1m hoặc muộn hơn
+  mốc quota khả dụng+1m. Không tạo worker/mua mail khi mã đã đủ10. Giữ slot
+  đến QThread.finished; không cho vòng sau cùng job bắt đầu khi worker cũ còn tồn tại.
+- `reschedule_combo_job` lưu lịch và tiến độ trong một transaction, không chốt
+  tiền giữ. Callback lặp không lùi lịch. `recover_combo_jobs` đưa combo chạy/chờ
+  bị ngắt về lịch, giữ deadline tương lai và mapping Telegram. Shutdown đang
+  chạy lưu phần đạt rồi thử tiếp sau1m; combo chờ tương lai vẫn giữ nguyên lịch.
+- `InviteQuotaStore.job_success_count` đối chiếu mọi lượt xác nhận của job qua
+  nhiều ngày. Restore phát progress vào ledger trước khi cho phép hủy, tránh
+  mất phí phần đã thành công khi crash xảy ra trước Qt progress. Stop thắng
+  kết quả quota đã xếp chờ, kể cả khoảng QTimer trước lần chạy đầu bị full quota.
+- Khách giữ tiền toàn bộ mục tiêu đúng1 lần, không hoàn/giữ lại giữa các đợt.
+  Hủy/hoàn thành tính bean tích lũy và hoàn dư1 lần. Lỗi mã/mail/proxy/API vẫn
+  kết thúc an toàn; chỉ giới hạn24h và shutdown mới tự hẹn tiếp.
+- Thêm ledger8 + lifecycle12 + Telegram9 + remote6 + runner1 =36 ca mới;
+  806 ca riêng biệt PASS trên Windows/Ubuntu. Windows full793, sau đó lifecycle12
+  và runner16 qua; Ubuntu full805 với hai bộ browser thiếu cache theo user SSH,
+  chạy lại browser24/consent6 với PLAYWRIGHT_BROWSERS_PATH của dịch vụ đều qua,
+  runner16 mới cũng qua. Không mua mail, nhập mã hoặc tạo đơn vận hành thật để thử.
+- Preview remote ở1120×760: `.tmp/combo_remote_ui.png`. Root và src giống byte.
+  Rollout chỉ thực hiện khi active/queued bằng0, sao lưu dữ liệu trước khi pull
+  và giữ trạng thái bot/SePay trước cập nhật.
+

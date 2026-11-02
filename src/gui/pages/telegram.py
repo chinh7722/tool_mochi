@@ -95,6 +95,7 @@ class TelegramPage(QWidget):
         mochi_page.scheduled_job_claim = self.store.claim_scheduled_job
         mochi_page.scheduled_job_cancel = self.store.cancel_scheduled_job
         mochi_page.scheduled_job_defer = self.store.defer_queued_schedule
+        mochi_page.combo_job_reschedule = self.store.reschedule_combo_job
         mochi_page.job_mail_keys_resolver = self._job_mail_keys
         self.store.migrate_legacy(self.config.chat_ids)
         self.store.sync_customer_profiles()
@@ -124,9 +125,12 @@ class TelegramPage(QWidget):
         mochi_page.job_failed.connect(self._on_job_failed)
         mochi_page.job_dispatch_changed.connect(self._on_job_dispatch_changed)
         mochi_page.job_progress.connect(self._on_job_progress)
+        if hasattr(mochi_page, 'job_combo_waiting'):
+            mochi_page.job_combo_waiting.connect(self._on_combo_waiting)
         if hasattr(mochi_page, 'mail_purchase_recorded'):
             mochi_page.mail_purchase_recorded.connect(self._on_mail_purchase_recorded)
         try:
+            self.store.recover_combo_jobs()
             for job in self.store.scheduled_jobs():
                 try:
                     mochi_page.restore_scheduled_job(job)
@@ -205,6 +209,7 @@ class TelegramPage(QWidget):
         self.lbl_status.setStyleSheet('color: #60a5fa; font-size: 12px;')
         bot_box.addWidget(self.lbl_status)
         help_text = QLabel('/id — lấy Chat ID   ·   /job MÃ_MỜI SỐ_KẸO [TÊN_KHÁCH] — tạo job   ·   /stats — thống kê cá nhân\n'
+            '/combo MÃ_MỜI SỐ_BEAN [TÊN_KHÁCH] — tự tiếp tục sau 24 giờ 1 phút khi đạt giới hạn ngày\n'
             '/mailapi KEY_GMAILVIP KEY_1TRIEUMAIL — lưu đủ 2 API riêng cho admin/partner; /mailapi — xem trạng thái\n'
             '/hen MÃ_MỜI SỐ_BEAN DD/MM/YYYY HH:MM — hẹn giờ Việt Nam · /lich — xem lịch · /huy MÃ_JOB — hủy job chưa chạy\n'
             'Ví dụ: /job VBRN5H 1000 Khách A. Bot chỉ nhận chat riêng khi tool đang mở; '
@@ -1063,6 +1068,7 @@ class TelegramPage(QWidget):
                 text = (f'Khách hàng {request.chat_id}\n'
                     '/id — ID khách hàng\n/sodu — số dư và thống kê\n/nap — hướng dẫn nạp SePay\n'
                     '/job MÃ_MỜI SỐ_BEAN — đặt đơn\n/donhang — đơn của bạn\n/giaodich — lịch sử giao dịch\n'
+                    '/combo MÃ_MỜI SỐ_BEAN — đặt combo, tự tiếp tục sau 24 giờ 1 phút khi đạt giới hạn ngày\n'
                     '/hen MÃ_MỜI SỐ_BEAN DD/MM/YYYY HH:MM — hẹn giờ Việt Nam\n/lich — xem lịch\n/huy MÃ_JOB — hủy job chưa chạy\n'
                     'Tiền được giữ khi tạo đơn, thu theo bean thực tế thành công và hoàn phần chưa chạy được.')
             reply(text)
@@ -1103,7 +1109,8 @@ class TelegramPage(QWidget):
         try:
             job_id = self.mochi_page._on_start_clicked(code=request.code,points=request.points,
                 customer_name=request.customer or f'Khách {request.chat_id}',before_start=before_start,
-                creator_name=profile['name'],creator_chat_id=request.chat_id,scheduled_at=request.scheduled_at)
+                creator_name=profile['name'],creator_chat_id=request.chat_id,scheduled_at=request.scheduled_at,
+                combo=request.combo)
         except ValueError as exc:
             error,job_id = str(exc),None
         except Exception:
@@ -1118,7 +1125,8 @@ class TelegramPage(QWidget):
         order = self.store.get_customer_order_for_job(job_id)
         self._job_chats[job_id] = (fingerprint,request.chat_id)
         self._refresh_customer_finance()
-        reply(f'Đã tạo đơn {order["order_id"]}\nMã job: {job_id}\nMã mời: {request.code}\n'
+        combo_text = 'Combo tự tiếp tục sau 24 giờ 1 phút khi đạt giới hạn ngày, đến khi đủ mục tiêu.\n' if request.combo else ''
+        reply(f'Đã tạo đơn {order["order_id"]}\nMã job: {job_id}\nMã mời: {request.code}\n' + combo_text +
             f'Trạng thái: {self.mochi_page.job_dispatch_text(job_id)}\n'
             f'Mục tiêu: {required_mochi_invitation_accounts(request.points)*100} bean\n'
             f'Tạm giữ: {vnd(order["reserved_units"])}. Thu theo bean thực tế thành công và hoàn phần còn lại.')
@@ -1173,7 +1181,7 @@ class TelegramPage(QWidget):
             job_id = self.mochi_page._on_start_clicked(code=request.code, points=request.points,
                 customer_name=request.customer or user.name, before_start=before_start,
                 creator_name=user.name, creator_chat_id=request.chat_id, scheduled_at=request.scheduled_at,
-                mail_api_keys=private_keys)
+                mail_api_keys=private_keys, combo=request.combo)
         except Exception as exc:
             creation_error=str(exc)
             job_id = None
@@ -1190,9 +1198,10 @@ class TelegramPage(QWidget):
             return
         self._render_users()
         self._job_chats[job_id] = (worker.fingerprint, request.chat_id)
+        combo_text = 'Combo tự tiếp tục sau 24 giờ 1 phút khi đạt giới hạn ngày, đến khi đủ mục tiêu.\n' if request.combo else ''
         worker.reply(request.chat_id,
             f'Đã tạo job {job_id}\nMã mời: {request.code}\nMục tiêu: {request.points:,} kẹo / '
-            f'{required_mochi_invitation_accounts(request.points)} tài khoản.\n'
+            f'{required_mochi_invitation_accounts(request.points)} tài khoản.\n' + combo_text +
             f'Trạng thái: {self.mochi_page.job_dispatch_text(job_id)}', request.update_id)
 
     @staticmethod
@@ -1224,6 +1233,31 @@ class TelegramPage(QWidget):
                     worker.reply(origin[1], text)
         except Exception:
             self.lbl_status.setText('Không cập nhật được trạng thái hàng đợi Telegram. Kiểm tra dữ liệu trong tool.')
+
+    def _on_combo_waiting(self, job_id, when):
+        """A saved next round keeps the same order, hold and notification origin."""
+        try:
+            self._refresh_customer_finance()
+            origin = self._job_chats.get(job_id)
+            worker = self.worker
+            if not origin or worker is None or worker.fingerprint != origin[0]:
+                return
+            job = self.store.get_job(job_id)
+            if job is None or job.chat_id != origin[1] or job.finalized_at is not None:
+                return
+            text = (f'Combo {job_id}: đang chờ lượt tiếp theo.\n'
+                f'Đã đạt: {job.success_count * 100:,}/{job.target_count * 100:,} bean.\n'
+                f'Còn thiếu: {max(0, job.target_count - job.success_count) * 100:,} bean.\n'
+                f'Tự tiếp tục: {schedule_text(when)}.')
+            order = self.store.get_customer_order_for_job(job_id)
+            if order and order['chat_id'] == origin[1]:
+                worker.reply(origin[1], f'Đơn {order["order_id"]}\n' + text, public=True)
+            else:
+                user = self.store.get_user(origin[1])
+                if user and user.active and worker.access.allowed(origin[1]):
+                    worker.reply(origin[1], text)
+        except Exception:
+            self.lbl_status.setText('Chưa gửi được thông báo lịch combo. Lịch đã lưu vẫn được giữ trong tool.')
 
     def _result_reply(self, job_id, text, *, failure_reason=''):
         origin = self._job_chats.pop(job_id, None)

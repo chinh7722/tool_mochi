@@ -177,6 +177,41 @@ class RuntimeTests(unittest.TestCase):
         csv_text=self.runtime.command('history.export',{})['text']
         self.assertIn(jid,csv_text)
 
+    def test_combo_option_requires_real_boolean_before_creating_job(self):
+        for value in ('true',1,None,[],{}):
+            with self.subTest(value=value),patch.object(self.runtime.mochi,'_on_start_clicked') as create:
+                with self.assertRaises(RemoteError):
+                    self.runtime.command('job.create',{'code':'TEST','points':5500,'combo':value})
+                create.assert_not_called()
+
+    def test_combo_mode_reaches_controller_without_changing_target(self):
+        with patch.object(self.runtime.mochi,'_on_start_clicked',return_value='combo-test') as create:
+            result=self.runtime.command('job.create',{'code':'TEST','points':5500,'combo':True})
+        self.assertEqual(result['job_id'],'combo-test')
+        create.assert_called_once_with(code='TEST',points=5500,customer_name='',scheduled_at=None,combo=True)
+
+    def test_scheduled_combo_survives_runtime_reconstruction(self):
+        from datetime import datetime,timedelta,timezone
+        from core.remote.runtime import Runtime
+        when=(datetime.now(timezone.utc)+timedelta(days=1)).isoformat()
+        jid=self.runtime.command('job.create',dict(code='COMBO',points=5500,combo=True,scheduled_at=when))['job_id']
+        self.assertFalse(self.runtime.mochi._workers)
+        self.runtime.shutdown()
+        restored=Runtime(self.temp.name)
+        try:
+            record=next(row for row in restored.state()['jobs'] if row['job_id']==jid)
+            self.assertTrue(record['combo'])
+            self.assertEqual(record['target_count'],55)
+            self.assertIsNotNone(record['scheduled_at'])
+            self.assertFalse(restored.mochi._workers)
+            restored.command('job.stop',{'job_id':jid})
+            self.assertEqual(restored.telegram.store.get_job(jid).status,'cancelled')
+        finally:
+            restored.shutdown()
+            for page in (restored.telegram,restored.mochi,restored.proxy,restored.mail_proxy):
+                page.deleteLater()
+            self.app.processEvents()
+
     def test_proxy_import_is_independent_and_hides_credentials(self):
         r=self.runtime
         r.command('proxy.import',dict(pool='account',text='127.0.0.1:8888:user:private-proxy-pass|test-key'))

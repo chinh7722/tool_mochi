@@ -148,6 +148,9 @@ def build_mochi(window):
     window.schedule.toggled.connect(window.schedule_time.setEnabled)
     schedule_row=QHBoxLayout();schedule_row.addWidget(window.schedule);schedule_row.addWidget(window.schedule_time);schedule_row.addStretch()
     grid.addLayout(schedule_row,4,0,1,2)
+    window.job_combo=QCheckBox('Nhập mã mời combo — tự tiếp tục sau 24 giờ 1 phút đến đủ bean')
+    window.job_combo.setToolTip('Đạt giới hạn 10 lượt / 24 giờ: lưu tiến độ và tự chạy lượt tiếp theo trên VPS. Có thể dừng job trong thời gian chờ.')
+    grid.addWidget(window.job_combo,5,0,1,2)
     setup_box.addLayout(grid)
     note=QLabel('Giờ Việt Nam · Lịch được lưu và thực hiện trên VPS, kể cả khi đóng ứng dụng quản lý.')
     note.setObjectName('smallMuted');note.setWordWrap(True);setup_box.addWidget(note)
@@ -248,6 +251,7 @@ def build_mochi(window):
     window.job_points.valueChanged.connect(window.update_job_quote)
     window.job_batch.currentIndexChanged.connect(window.update_job_quote)
     window.schedule.toggled.connect(window.update_job_quote)
+    window.job_combo.toggled.connect(window.update_job_quote)
     return page
 
 

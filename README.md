@@ -1,5 +1,9 @@
 # hoshino-tool — Mochi Chat, Proxy Pool & Telegram
 
+> **[Nhập mã mời combo](COMBO_MA_MOI_2026-11-03.md):** nhập tổng bean, bật Combo
+> hoặc nhắn `/combo MÃ_MỜI SỐ_BEAN`. Đạt giới hạn ngày thì lưu cùng job và tự chạy
+> tiếp sau 24 giờ 1 phút đến đủ mục tiêu; giữ tiến độ/lịch khi VPS khởi động lại.
+
 > **[Giới hạn mã mời 24 giờ](GIOI_HAN_MA_MOI_24H_2026-11-03.md):** cộng mọi lượt nhập
 > thành công theo mã, kể cả trong job lỗi/hủy. Đủ10 lượt trong24h gần nhất trả
 > giới hạn ngay, không mua mail thử. Còn ít lượt chỉ mua phần quota còn lại;

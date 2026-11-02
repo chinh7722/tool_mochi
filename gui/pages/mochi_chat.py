@@ -10,6 +10,7 @@ import asyncio
 import html
 import json
 from collections import defaultdict, deque
+from dataclasses import replace
 from datetime import datetime, timedelta
 import logging
 import math
@@ -229,6 +230,11 @@ class _MochiJobSessionRecord:
         self.failure_count = 0
         self.status = status
         self.created_at = datetime.now(JOB_TIMEZONE)
+        self.combo = False
+        self.combo_cancel_requested = False
+        self._round_pending = False
+        self._round_attempted_base = 0
+        self._round_failure_base = 0
 
     @property
     def achieved_points(self) -> int:
@@ -248,7 +254,7 @@ class _MochiJobSessionRecord:
 
     @property
     def is_running_like(self) -> bool:
-        return self.status in ("Đang chạy", "Đang khởi tạo", "Đang chờ", "Hẹn giờ")
+        return self.status in ("Đang chạy", "Đang khởi tạo", "Đang chờ", "Hẹn giờ", "Chờ lượt combo")
 
 
 class MochiWorkerThread(QThread):
@@ -372,6 +378,7 @@ class MochiChatPage(QWidget):
     job_failed = Signal(str, str)
     job_progress = Signal(object)
     job_dispatch_changed = Signal(str, str)
+    job_combo_waiting = Signal(str, str)
     mail_purchase_recorded = Signal(object)
 
     def __init__(self, settings: Optional[QSettings] = None, parent: Optional[QWidget] = None, proxy_page: Optional[Any] = None):
@@ -386,6 +393,7 @@ class MochiChatPage(QWidget):
         self.scheduled_job_claim = None
         self.scheduled_job_cancel = None
         self.scheduled_job_defer = None
+        self.combo_job_reschedule = None
         self.job_mail_keys_resolver = None
         self._active_job_ids = set()
         self._dispatching_jobs = False
@@ -698,6 +706,9 @@ class MochiChatPage(QWidget):
         schedule_row.addWidget(self.input_schedule_time)
         schedule_row.addStretch()
         grid.addLayout(schedule_row, 4, 0, 1, 2)
+        self.chk_combo_job = QCheckBox('Nhập mã mời combo · tự tiếp tục sau 24 giờ 1 phút đến đủ bean', self)
+        self.chk_combo_job.setToolTip('Giữ cùng mã job và cộng dồn bean qua các đợt. Lịch chờ được lưu trên VPS.')
+        grid.addWidget(self.chk_combo_job, 5, 0, 1, 2)
         schedule_hint = QLabel('Giờ Việt Nam · Lịch chạy một lần. Tool cần mở để thực hiện; lịch được giữ khi đóng/mở lại.', self)
         schedule_hint.setWordWrap(True)
         schedule_hint.setStyleSheet('color: #94a3b8; font-size: 11px;')
@@ -1492,7 +1503,8 @@ class MochiChatPage(QWidget):
                 return None
         record=scheduled_record or _MochiJobSessionRecord(job_id,code,target_accs,
             customer_name=customer,status='Đạt giới hạn 24h',creator_name=creator,creator_chat_id=chat_id)
-        record.status='Đạt giới hạn 24h'
+        record.status='Đang khởi tạo' if record.combo else 'Đạt giới hạn 24h'
+        record._quota_finish_pending = True
         record.total_vnd=total_vnd
         self._session_jobs[job_id]=record
         self._selected_job_id=job_id
@@ -1505,7 +1517,7 @@ class MochiChatPage(QWidget):
         if when:
             message+=' Có lượt khả dụng từ '+when+' (giờ Việt Nam).'
         self._append_log_line(message,color='#f59e0b',job_id=job_id)
-        summary=MochiInviteJobSummary(job_id,code,target_accs,0,0,0,0,
+        summary=MochiInviteJobSummary(job_id,code,target_accs,0,record.success_count,0,0,
             'invite_limit_reached',(),message)
         # Telegram's job/owner mapping is installed after this method returns.
         QTimer.singleShot(0,lambda:self._on_job_finished(summary))
@@ -1513,11 +1525,16 @@ class MochiChatPage(QWidget):
 
     def _on_start_clicked(self, *, code=None, points=None, customer_name=None, before_start=None,
             creator_name='Local', creator_chat_id=None, scheduled_at=None, _scheduled_record=None,
-            mail_api_keys=None):
+            mail_api_keys=None, combo=False):
         if self._closing_jobs:
             self._set_validation_message('Tool đang đóng; không nhận thêm job mới.')
             return None
         local_request = code is None
+        combo = (_scheduled_record.combo if _scheduled_record else
+            self.chk_combo_job.isChecked() if local_request else combo)
+        if type(combo) is not bool:
+            self._set_validation_message('Chế độ combo không hợp lệ.')
+            return None
         code = str(self.input_code.text() if code is None else code).strip().upper()
         if not code:
             self._set_validation_message("Vui lòng nhập mã mời Mochi!")
@@ -1553,9 +1570,18 @@ class MochiChatPage(QWidget):
                 selected.time().hour(),selected.time().minute(),tzinfo=VIETNAM_TIME)
         if scheduled_at is not None:
             return self._create_scheduled_job(code, points, customer_name, total_vnd, scheduled_at,
-                before_start, creator_name, creator_chat_id)
+                before_start, creator_name, creator_chat_id, combo=combo)
+        if combo and _scheduled_record is None:
+            # Persist ownership, target and any customer hold before the first run.
+            return self._create_scheduled_job(code, points, customer_name, total_vnd, None,
+                before_start, creator_name, creator_chat_id, combo=True)
         if _scheduled_record is not None:
             total_vnd = _scheduled_record.total_vnd
+            if _scheduled_record.success_count >= target_accs:
+                job_id = _scheduled_record.job_id
+                QTimer.singleShot(0, lambda: self._on_job_finished(MochiInviteJobSummary(
+                    job_id,code,target_accs,0,_scheduled_record.success_count,0,0,'completed',())))
+                return job_id
         try:
             quota=self._invite_quota_snapshot(code)
         except Exception:
@@ -1579,8 +1605,9 @@ class MochiChatPage(QWidget):
             except (OSError, ValueError) as exc:
                 self._set_validation_message(f'Không đọc được lô mail đã mua: {exc}')
                 return
-            if len(accounts) < target_accs:
-                self._set_validation_message(f'Lô chỉ còn {len(accounts)} mail chưa thành công, cần {target_accs}. Giảm mục tiêu hoặc chọn lô khác; tool không mua bù.')
+            required_accounts = target_accs - (_scheduled_record.success_count if _scheduled_record else 0)
+            if len(accounts) < required_accounts:
+                self._set_validation_message(f'Lô chỉ còn {len(accounts)} mail chưa thành công, cần {required_accounts}. Giảm mục tiêu hoặc chọn lô khác; tool không mua bù.')
                 return
 
         api_key = self.input_api_key.text().strip()
@@ -1716,6 +1743,10 @@ class MochiChatPage(QWidget):
         )
         record.status = 'Đang chờ'
         record.total_vnd = total_vnd
+        record.combo = combo
+        record._round_attempted_base = record.attempted_count
+        record._round_failure_base = record.failure_count
+        record._round_pending = True
         self._session_jobs[job_id] = record
         self._selected_job_id = job_id
         self._lbl_log_filter_update()
@@ -1749,6 +1780,7 @@ class MochiChatPage(QWidget):
             parent=self,
             accounts=accounts,
             source_mail_batch=source_mail_batch,
+            initial_success_count=record.success_count,
         )
         worker.log_signal.connect(self._handle_runner_log)
         worker.progress_signal.connect(self._handle_runner_progress)
@@ -1776,9 +1808,9 @@ class MochiChatPage(QWidget):
                 color='#60a5fa', job_id=job_id)
         return job_id
 
-    def _create_scheduled_job(self, code, points, customer, total_vnd, when, registrar, creator, chat_id):
+    def _create_scheduled_job(self, code, points, customer, total_vnd, when, registrar, creator, chat_id, *, combo=False):
         try:
-            when = schedule_time(when, future=True)
+            when = schedule_time(when, future=True) if when is not None else datetime.now(VIETNAM_TIME)
             if not re.fullmatch(r'[A-Z0-9_-]{1,64}', code) or not 1 <= points <= 1_000_000:
                 raise ValueError('Mã mời hoặc số bean không hợp lệ để hẹn giờ.')
             registrar = registrar or self.local_job_registrar
@@ -1790,6 +1822,8 @@ class MochiChatPage(QWidget):
                 raise ValueError('Vui lòng chọn lô mail đã mua trước khi đặt lịch.')
             data = dict(customer_name=customer, creator_name=creator, total_vnd=total_vnd,
                 source_mail_batch=str(Path(source).expanduser().resolve()) if source else None)
+            if combo:
+                data['combo'] = True
             target = required_mochi_invitation_accounts(points)
             if not registrar(job_id, code, points, target, scheduled_at=when.isoformat(), schedule_data=data):
                 raise ValueError('Yêu cầu này đã có job; không tạo thêm lịch trùng.')
@@ -1820,8 +1854,22 @@ class MochiChatPage(QWidget):
         record.scheduled_at = when
         record.source_mail_batch = data.get('source_mail_batch')
         record.total_vnd = int(data.get('total_vnd') or 0)
+        record.combo = data.get('combo', False) is True
+        record.success_count = int(job.get('success_count') or 0)
+        record.attempted_count = int(job.get('attempted_count') or 0)
+        record.failure_count = int(job.get('failure_count') or 0)
+        if record.combo:
+            # A crash can happen after redeem was durably confirmed, before its Qt
+            # progress event reached the ownership ledger. Never purchase it twice.
+            record.success_count = max(record.success_count,
+                self.invite_quota_store.job_success_count(record.invite_code, job_id))
+            record.attempted_count = max(record.attempted_count, record.success_count)
+            record.status = 'Chờ lượt combo'
         self._session_jobs[job_id] = record
         self._scheduled_jobs[job_id] = record
+        if record.combo:
+            self.job_progress.emit(JobProgressEvent(job_id,record.target_points,
+                record.attempted_count,record.success_count,record.failure_count,'scheduled'))
         self._selected_job_id = job_id
         self._render_jobs_table()
         self._update_action_buttons_state()
@@ -1831,7 +1879,8 @@ class MochiChatPage(QWidget):
         if self._closing_jobs:
             return
         now = now or datetime.now(VIETNAM_TIME)
-        due = [(jid, record) for jid, record in self._scheduled_jobs.items() if record.scheduled_at <= now]
+        due = [(jid, record) for jid, record in self._scheduled_jobs.items()
+            if record.scheduled_at <= now and jid not in self._workers]
         if not due:
             return
         for job_id, record in sorted(due, key=lambda pair: pair[1].scheduled_at):
@@ -1878,7 +1927,8 @@ class MochiChatPage(QWidget):
 
     def job_dispatch_text(self, job_id):
         if job_id in self._scheduled_jobs:
-            return 'Hẹn giờ: ' + schedule_text(self._scheduled_jobs[job_id].scheduled_at)
+            record = self._scheduled_jobs[job_id]
+            return ('Combo chạy tiếp: ' if record.combo else 'Hẹn giờ: ') + schedule_text(record.scheduled_at)
         if job_id in self._pending_jobs:
             return f'Đang chờ (vị trí {list(self._pending_jobs).index(job_id) + 1})'
         if job_id in self._active_job_ids:
@@ -1961,22 +2011,29 @@ class MochiChatPage(QWidget):
                 self._set_validation_message('Chưa lưu được hủy lịch. Lịch và tiền tạm giữ vẫn được giữ.')
                 return
             self._scheduled_jobs.pop(job_id)
+            rec.combo_cancel_requested = True
             self._on_job_finished(MochiInviteJobSummary(job_id, rec.invite_code, rec.target_count,
                 0, 0, 0, 0, 'cancelled', ()))
             self._update_job_queue_label()
         elif worker and job_id in self._pending_jobs:
+            rec.combo_cancel_requested = True
             self._pending_jobs.remove(job_id)
             rec = self._session_jobs[job_id]
             self._on_job_finished(MochiInviteJobSummary(job_id, rec.invite_code, rec.target_count,
                 0, 0, 0, 0, 'cancelled', ()))
             self._on_worker_stopped(job_id)
         elif worker and (job_id in self._active_job_ids or worker.isRunning()):
+            rec.combo_cancel_requested = True
             self._append_log_line(f"⚠️ Đang gửi yêu cầu dừng job [{job_id}]...", color="#f59e0b", job_id=job_id)
             worker.request_cancel()
             rec = self._session_jobs.get(job_id)
             if rec:
                 rec.status = "Đang dừng..."
                 self._render_jobs_table()
+        elif rec and rec.combo and getattr(rec,'_quota_finish_pending',False):
+            rec.combo_cancel_requested = True
+            rec.status = 'Đang dừng...'
+            self._render_jobs_table()
         self._update_action_buttons_state()
 
     def _delete_job(self, job_id: str):
@@ -2039,6 +2096,9 @@ class MochiChatPage(QWidget):
     def _handle_runner_progress(self, evt: JobProgressEvent):
         record = self._session_jobs.get(evt.job_id)
         if record:
+            if record.combo and record._round_pending:
+                evt = replace(evt, attempted_count=record._round_attempted_base + evt.attempted_count,
+                    failure_count=record._round_failure_base + evt.failure_count)
             record.attempted_count = evt.attempted_count
             record.success_count = evt.success_count
             record.failure_count = evt.failure_count
@@ -2047,15 +2107,63 @@ class MochiChatPage(QWidget):
             self._render_jobs_table()
         self.job_progress.emit(evt)
 
+    def _reschedule_combo(self, record, *, limited=True):
+        """Commit the next round before announcing it or releasing its customer hold."""
+        when = datetime.now(VIETNAM_TIME) + (timedelta(hours=24,minutes=1)
+            if limited else timedelta(minutes=1))
+        if limited:
+            quota = self._invite_quota_snapshot(record.invite_code)
+            if quota.next_available_at is not None:
+                when = max(when,quota.next_available_at.astimezone(VIETNAM_TIME)+timedelta(minutes=1))
+        if self.combo_job_reschedule is None or not self.combo_job_reschedule(record.job_id,when,
+                record.success_count,attempted_count=record.attempted_count,failure_count=record.failure_count):
+            raise RuntimeError('Không lưu được lịch chạy tiếp combo; chưa chạy hoặc mua mail thêm.')
+        record.status = 'Chờ lượt combo'
+        record.scheduled_at = when
+        self._scheduled_jobs[record.job_id] = record
+        self._append_log_line(f'Combo đạt {record.achieved_points:,}/{record.target_points:,} bean. '
+            f'Còn {max(0,record.target_points-record.achieved_points):,} bean; chạy tiếp {schedule_text(when)}.',
+            color='#60a5fa',job_id=record.job_id)
+        self.job_progress.emit(JobProgressEvent(record.job_id,record.target_points,
+            record.attempted_count,record.success_count,record.failure_count,'scheduled'))
+        self.job_combo_waiting.emit(record.job_id,when.isoformat())
+        self._render_jobs_table()
+        self._update_job_queue_label()
+        self._update_action_buttons_state()
+
     def _on_job_finished(self, summary: MochiInviteJobSummary):
         jid = summary.job_id
         self._update_action_buttons_state()
 
         record = self._session_jobs.get(jid)
         if record:
+            if record.combo and jid in self._scheduled_jobs and summary.status == 'invite_limit_reached':
+                return
+            record._quota_finish_pending = False
+            if record.combo and record._round_pending:
+                summary = replace(summary,
+                    attempted_count=record._round_attempted_base+summary.attempted_count,
+                    failure_count=record._round_failure_base+summary.failure_count)
+            record._round_pending = False
             record.success_count = max(record.success_count,summary.success_count)
             record.failure_count = max(record.failure_count,summary.failure_count)
             record.attempted_count = max(record.attempted_count,summary.attempted_count)
+            if record.combo:
+                summary = replace(summary,success_count=record.success_count,
+                    attempted_count=record.attempted_count,failure_count=record.failure_count)
+                # Explicit Stop always wins, including while the final quota event
+                # is already queued from a worker thread.
+                if record.combo_cancel_requested and summary.status != 'completed':
+                    summary = replace(summary,status='cancelled')
+                limited = summary.status == 'invite_limit_reached'
+                interrupted = self._closing_jobs and summary.status == 'cancelled' and not record.combo_cancel_requested
+                if record.success_count < record.target_count and (limited or interrupted):
+                    try:
+                        self._reschedule_combo(record,limited=limited)
+                        return
+                    except Exception:
+                        summary = replace(summary,status='failed',error_message=
+                            'Không lưu được lịch chạy tiếp combo. Kiểm tra dữ liệu VPS trước khi chạy lại.')
             if summary.status == "completed":
                 record.status = "Hoàn thành"
             elif summary.status == "cancelled":
@@ -2141,7 +2249,7 @@ class MochiChatPage(QWidget):
             item_status = QTableWidgetItem(rec.status)
             if rec.status == "Hoàn thành":
                 item_status.setForeground(QColor("#10b981"))
-            elif rec.status in ("Đang chạy", "Đang dừng...", "Đang chờ", "Hẹn giờ"):
+            elif rec.status in ("Đang chạy", "Đang dừng...", "Đang chờ", "Hẹn giờ", "Chờ lượt combo"):
                 item_status.setForeground(QColor("#60a5fa"))
             elif rec.status in ("Thất bại", "Mã không hợp lệ"):
                 item_status.setForeground(QColor("#ef4444"))
