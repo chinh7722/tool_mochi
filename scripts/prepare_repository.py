@@ -6,15 +6,15 @@ from pathlib import Path
 import zipfile
 
 ROOT = Path(__file__).resolve().parents[1]
-ENTRYPOINTS = ('main_mochi_gui.py','main_mochi_server.py','cli_mochi.py',
-    'Launch_HoshinoTool.bat','Launch_MochiTool.bat','Launch_VPS_Manager.bat','Open_VPS_Tunnel.bat',
+ENTRYPOINTS = ('main_mochi_gui.py','main_mochi_server.py','main_mochi_web.py','cli_mochi.py',
+    'Launch_HoshinoTool.bat','Launch_MochiTool.bat','Launch_VPS_Manager.bat','Launch_Web_VPS_Manager.bat','Open_VPS_Tunnel.bat',
     '.gitignore','.gitattributes','requirements.txt','requirements-core.txt')
 
 
 def source_files(root=ROOT):
     selected = {root/name for name in ENTRYPOINTS if (root/name).is_file()}
     selected.update(root.glob('*.md'))
-    for directory in ('core','gui','src','tests','scripts','deploy','docs','.github','examples'):
+    for directory in ('core','gui','src','web','tests','scripts','deploy','docs','.github','examples'):
         for path in (root/directory).rglob('*'):
             if not path.is_file() or path.is_symlink():
                 continue
@@ -22,6 +22,8 @@ def source_files(root=ROOT):
             if any(part in ('__pycache__','android','data','node_modules','.venv') for part in relative.parts):
                 continue
             allowed = ('.py','.md','.sh','.service','.yml','.yaml','.txt','.svg','.png','.jpg','.ico')
+            if directory=='web':
+                allowed += ('.html','.css','.js')
             if path.suffix.lower() in allowed or path.name=='Dockerfile':
                 selected.add(path)
     return sorted(selected)

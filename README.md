@@ -1,5 +1,17 @@
 # hoshino-tool — Mochi Chat, Proxy Pool & Telegram
 
+> **[CSV báo cáo theo người dùng](BAO_CAO_CSV_THEO_NGUOI_DUNG_2026-11-03.md):**
+> chọn người trong bảng Telegram rồi bấm **Xuất báo cáo CSV** trên tool/web.
+> Bot dùng `/baocao`: partner xuất của mình; admin dùng `/baocao CHAT_ID` để xuất
+> lịch sử job và mua mail của partner hoặc admin khác.
+
+> **[Hướng dẫn sử dụng phần mềm và web](HUONG_DAN_SU_DUNG_PHAN_MEM_VA_WEB.md):**
+> cách mở, kết nối VPS, tạo job/combo, proxy, Telegram, khách hàng, SePay và xử lý lỗi.
+
+> **[Web local quản lý VPS](docs/WEB_LOCAL.md):** mở `Launch_Web_VPS_Manager.bat`
+> để dùng giao diện giống phần mềm trên trình duyệt tại localhost. Dùng chung
+> SSH tunnel và cấu hình kết nối; job vẫn chạy trên VPS khi đóng web.
+
 > **[Admin quản lý partner trên bot](QUAN_LY_PARTNER_BOT_2026-11-03.md):** dùng
 > `/partner_add CHAT_ID TÊN`, `/partner_remove CHAT_ID`, `/partners [TRANG]` và
 > `/partner CHAT_ID` trong chat riêng. Xóa quyền vẫn giữ lịch sử job và tài chính.

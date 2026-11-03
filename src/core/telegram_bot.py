@@ -1,6 +1,7 @@
 """Telegram job commands with a private-chat allowlist and bounded polling."""
 
 import asyncio
+from concurrent.futures.thread import ThreadPoolExecutor
 from dataclasses import dataclass, field
 import re
 import threading
@@ -11,6 +12,9 @@ from core.mail.user_keys import validated_user_mail_keys
 from core.mail.providers.priority import GMAILVIP, ONE_TRIEU
 
 from curl_cffi.requests import AsyncSession
+from curl_cffi import CurlMime
+
+MAX_REPORT_BYTES = 6 * 1024 * 1024
 
 
 def validate_bot_token(token):
@@ -119,6 +123,19 @@ def parse_control_command(text, chat_id, role, update_id):
     """Parse private commands; current ledger permissions are checked on dispatch."""
     parts = text.strip().split(maxsplit=3)
     command = parts[0].lower().split('@', 1)[0]
+    if command in ('/baocao','/report'):
+        if role not in ('admin','partner'):
+            raise ValueError('Chỉ admin/partner đang được cấp quyền mới được xuất báo cáo.')
+        if len(parts)>2:
+            raise ValueError('Cú pháp: /baocao [CHAT_ID]. Bỏ Chat ID để xuất báo cáo của mình.')
+        target=chat_id
+        if len(parts)==2:
+            if not re.fullmatch(r'[1-9][0-9]{0,18}',parts[1]):
+                raise ValueError('Chat ID báo cáo phải là số nguyên dương.')
+            target=parse_chat_ids(parts[1])[0]
+        if role!='admin' and target!=chat_id:
+            raise ValueError('Partner chỉ được xuất báo cáo của chính mình.')
+        return TelegramControlRequest(update_id,chat_id,'user_report',target)
     partner_commands = {'/partner_add':'partner_add','/partner_remove':'partner_remove',
         '/partner_delete':'partner_remove','/partners':'partner_list',
         '/partner':'partner_info','/partner_info':'partner_info'}
@@ -211,12 +228,18 @@ class TelegramApi:
         try:
             response = await self._session.post(f'https://api.telegram.org/bot{self._token}/{method}',
                 json=payload or {}, timeout=30, verify=True)
-            data = response.json()
         except asyncio.CancelledError:
             raise
         except Exception:
             # Network exceptions often contain the URL, which includes the token.
             raise TelegramApiError(0, 'Không kết nối được Telegram; kiểm tra mạng.') from None
+        return self._result(response)
+
+    def _result(self,response):
+        try:
+            data=response.json()
+        except Exception:
+            raise TelegramApiError(0,'Telegram trả dữ liệu không hợp lệ.') from None
         if not isinstance(data, dict):
             raise TelegramApiError(0, 'Telegram trả dữ liệu không hợp lệ.')
         if data.get('ok') is not True or not 200 <= response.status_code < 300:
@@ -234,13 +257,35 @@ class TelegramApi:
             raise TelegramApiError(code, description, retry)
         return data.get('result')
 
+    async def send_document(self,chat_id,data,filename,caption=''):
+        """Upload one in-memory CSV; never write a report or credential to disk."""
+        if (type(chat_id) is not int or not 1<=chat_id<=2**63-1 or not isinstance(data,bytes)
+                or not data or len(data)>MAX_REPORT_BYTES or not isinstance(filename,str)
+                or not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9_.-]{0,175}\.csv',filename)
+                or not isinstance(caption,str) or len(caption)>900):
+            raise ValueError('Tệp báo cáo Telegram không hợp lệ.')
+        multipart=CurlMime()
+        try:
+            multipart.addpart(name='document',filename=filename,content_type='text/csv; charset=utf-8',data=data)
+            try:
+                response=await self._session.post(f'https://api.telegram.org/bot{self._token}/sendDocument',
+                    data={'chat_id':str(chat_id),'caption':caption},multipart=multipart,timeout=60,verify=True)
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                raise TelegramApiError(0,'Không xác nhận được tệp báo cáo đã gửi; kiểm tra Telegram trước khi yêu cầu lại.') from None
+            return self._result(response)
+        finally:
+            multipart.close()
+
 
 class TelegramBotService:
     ADMIN_HELP = ('\nQuản lý partner (admin):\n'
         '/partner_add CHAT_ID TÊN: thêm hoặc khôi phục partner.\n'
         '/partner_remove CHAT_ID: xóa quyền partner, giữ lịch sử.\n'
         '/partners [TRANG]: danh sách partner.\n'
-        '/partner CHAT_ID: thông tin và thống kê của partner.')
+        '/partner CHAT_ID: thông tin và thống kê của partner.\n'
+        '/baocao CHAT_ID: xuất CSV mua mail và job của partner/admin khác.')
     HELP = ('Lệnh tạo job: /job MÃ_MỜI SỐ_KẸO [TÊN_KHÁCH]\n'
         '/mailapi KEY_GMAILVIP KEY_1TRIEUMAIL: lưu đủ 2 API mua mail riêng. /mailapi: xem trạng thái đã nhập.\n'
         'Ví dụ: /job VBRN5H 1000 Khách A\n'
@@ -248,6 +293,7 @@ class TelegramBotService:
         'Hẹn giờ: /hen MÃ_MỜI SỐ_BEAN DD/MM/YYYY HH:MM [TÊN_KHÁCH] (giờ Việt Nam).\n'
         '/lich: xem lịch. /huy MÃ_JOB: hủy lịch/job chưa chạy của bạn.\n'
         '/id: xem chat ID. /stats: xem thống kê của bạn.\n'
+        '/baocao: nhận hai tệp CSV lịch sử mua mail và job của chính mình.\n'
         'Job dùng cấu hình đang chọn trong tool; tool cần đang mở.')
 
     def __init__(self, api, access, on_job: Callable, on_status: Callable = lambda text: None, *, on_control=None, on_customer=None):
@@ -255,6 +301,7 @@ class TelegramBotService:
         self.offset = 0
         self.username = ''
         self.outbox = asyncio.Queue(maxsize=256)
+        self.report_outbox = asyncio.Queue(maxsize=4)
         self.pending = set()
         self.on_control = on_control
         self.on_customer = on_customer
@@ -274,6 +321,41 @@ class TelegramBotService:
 
     def complete(self, request_id):
         self.pending.discard(request_id)
+
+    def _report_role_allowed(self,chat_id,target_id,admin_only=False):
+        return (self.access.allowed(chat_id) and self.access.role(chat_id) in ('admin','partner')
+            and ((chat_id==target_id and not admin_only) or self.access.role(chat_id)=='admin'))
+
+    def send_report(self,chat_id,report,*,target_id,authorize,admin_only=False):
+        """Bound the memory queue and freeze already authorized report bytes."""
+        if (type(chat_id) is not int or type(target_id) is not int or not 1<=target_id<=2**63-1
+                or not callable(authorize) or not self._report_role_allowed(chat_id,target_id,admin_only)):
+            return False
+        try:
+            if not isinstance(report,dict) or report.get('owner',{}).get('chat_id')!=target_id:
+                return False
+            files=report.get('files')
+            if not isinstance(files,list) or not 1<=len(files)<=2:
+                return False
+            documents=[]
+            total=0
+            for item in files:
+                filename=item.get('filename')
+                text=item.get('text')
+                count=item.get('row_count')
+                if (not isinstance(filename,str) or not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9_.-]{0,175}\.csv',filename)
+                        or not isinstance(text,str) or type(count) is not int or count<0):
+                    return False
+                data=text.encode('utf-8')
+                total+=len(data)
+                if not data or total>MAX_REPORT_BYTES:
+                    return False
+                title='Lịch sử job' if item.get('kind')=='jobs' else 'Lịch sử mua mail'
+                documents.append((filename,data,f'{title} · Chat ID {target_id} · {count} dòng'))
+            self.report_outbox.put_nowait((chat_id,target_id,tuple(documents),authorize,bool(admin_only)))
+            return True
+        except (AttributeError,TypeError,ValueError,UnicodeError,asyncio.QueueFull):
+            return False
 
     def handle_update(self, update):
         if not isinstance(update, dict) or type(update.get('update_id')) is not int:
@@ -347,7 +429,7 @@ class TelegramBotService:
         if base in ('/start', '/help'):
             self.reply(chat_id, self.HELP+(self.ADMIN_HELP if self.access.role(chat_id)=='admin' else ''))
         elif base in ('/stats', '/users', '/user_add', '/user_revoke','/lich','/schedules','/huy','/cancel','/mailapi',
-                '/partner_add','/partner_remove','/partner_delete','/partners','/partner','/partner_info'):
+                '/partner_add','/partner_remove','/partner_delete','/partners','/partner','/partner_info','/baocao','/report'):
             try:
                 request = parse_control_command(text, chat_id, self.access.role(chat_id), update_id)
             except ValueError as exc:
@@ -408,6 +490,56 @@ class TelegramBotService:
             finally:
                 self.outbox.task_done()
 
+    async def _send_reports(self):
+        # Own the authorization executor rather than relying on process-global
+        # lazy concurrent.futures exports inspected by Qt bindings on Windows.
+        executor=ThreadPoolExecutor(max_workers=1,thread_name_prefix='telegram-report-auth')
+        try:
+            await self._report_sender_loop(executor)
+        finally:
+            executor.shutdown(wait=False,cancel_futures=True)
+
+    async def _report_sender_loop(self,executor):
+        while True:
+            item=await self.report_outbox.get()
+            chat_id,target_id,documents,authorize,admin_only=item
+            try:
+                interrupted=False
+                for filename,data,caption in documents:
+                    if interrupted:
+                        break
+                    for attempt in range(3):
+                        try:
+                            allowed=(self._report_role_allowed(chat_id,target_id,admin_only)
+                                and await asyncio.get_running_loop().run_in_executor(executor,authorize,chat_id,target_id) is True)
+                            allowed=allowed and self._report_role_allowed(chat_id,target_id,admin_only)
+                        except Exception:
+                            allowed=False
+                        if not allowed:
+                            self.on_status('Đã dừng gửi báo cáo vì không còn xác minh được quyền xuất báo cáo.')
+                            interrupted=True
+                            break
+                        try:
+                            await self.api.send_document(chat_id,data,filename,caption)
+                            break
+                        except TelegramApiError as exc:
+                            if exc.code==429 and exc.retry_after>0 and attempt<2:
+                                await asyncio.sleep(exc.retry_after)
+                                continue
+                            self.on_status('Chưa gửi đủ tệp báo cáo. Kiểm tra các tệp đã nhận trước khi yêu cầu lại.')
+                            self.reply(chat_id,'Chưa xác nhận được toàn bộ tệp báo cáo. Kiểm tra các tệp đã nhận trước khi dùng /baocao lại.')
+                            interrupted=True
+                            break
+                        except asyncio.CancelledError:
+                            raise
+                        except Exception:
+                            self.on_status('Không gửi được tệp báo cáo; không tự gửi lại yêu cầu chưa rõ kết quả.')
+                            interrupted=True
+                            break
+            finally:
+                self.report_outbox.task_done()
+                item=documents=authorize=data=None
+
     async def run(self):
         identity = await self.api.call('getMe')
         if not isinstance(identity, dict) or not isinstance(identity.get('username'), str):
@@ -424,6 +556,7 @@ class TelegramBotService:
                     self.offset = max(self.offset, update['update_id'] + 1)
         self.on_status(f'Bot @{self.username} đang nhận lệnh mới.')
         sender = asyncio.create_task(self._send_replies())
+        report_sender = asyncio.create_task(self._send_reports())
         try:
             while True:
                 try:
@@ -442,4 +575,5 @@ class TelegramBotService:
                     await asyncio.sleep(max(3, exc.retry_after))
         finally:
             sender.cancel()
-            await asyncio.gather(sender, return_exceptions=True)
+            report_sender.cancel()
+            await asyncio.gather(sender,report_sender,return_exceptions=True)

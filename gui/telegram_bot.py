@@ -68,6 +68,33 @@ class TelegramBotThread(QThread):
             except RuntimeError:
                 pass
 
+    def send_report(self,chat_id,report,request_id=None,*,target_id,admin_only=False,authorize=None):
+        if (not self._loop or not self._service or self._stop.is_set()
+                or not callable(authorize)):
+            return False
+        service=self._service
+
+        def current_authority(actor,owner):
+            if self._service is not service or self._stop.is_set():
+                return False
+            allowed=authorize(actor,owner)
+            return allowed is True and self._service is service and not self._stop.is_set()
+
+        def deliver():
+            if self._service is not service or self._stop.is_set():
+                return
+            if request_id is not None:
+                service.complete(request_id)
+            if not service.send_report(chat_id,report,target_id=target_id,
+                    authorize=current_authority,admin_only=admin_only):
+                service.reply(chat_id,'Chưa xếp được báo cáo vào hàng đợi gửi; vui lòng thử lại sau.',
+                    admin_only=admin_only)
+        try:
+            self._loop.call_soon_threadsafe(deliver)
+            return True
+        except RuntimeError:
+            return False
+
     def broadcast(self, broadcast_id, chat_ids, text):
         if not self._loop or not self._service or self._stop.is_set():
             return False

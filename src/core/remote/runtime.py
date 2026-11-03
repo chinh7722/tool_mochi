@@ -104,7 +104,7 @@ class Runtime:
             'job.create', 'job.stop', 'job.logs', 'proxy.import', 'proxy.check', 'proxy.rotate',
             'proxy.delete', 'settings.save', 'telegram.save', 'telegram.start', 'telegram.stop',
             'telegram.broadcast', 'telegram.cancel_broadcast', 'user.save', 'user.active',
-            'user.mail_keys', 'user.jobs', 'customer.save', 'customer.delete', 'customer.balance',
+            'user.mail_keys', 'user.jobs', 'user.report', 'customer.save', 'customer.delete', 'customer.balance',
             'customer.history', 'customer.settle', 'finance.ledger', 'finance.reconcile',
             'finance.price', 'sepay.save', 'sepay.start', 'sepay.stop', 'sepay.reconcile',
             'lookup.start', 'lookup.cancel', 'batch.upload', 'batch.list', 'history.export', 'proxy.export')}
@@ -326,6 +326,16 @@ class Runtime:
         if owner == 0:
             raise RemoteError('Chat ID không hợp lệ.')
         return {'rows': [dict(row) for row in self.telegram.store.list_jobs(owner)][-500:]}
+
+    def do_user_report(self, data):
+        owner = integer(data, 'chat_id', minimum=-1)
+        if owner == 0:
+            raise RemoteError('Chat ID không hợp lệ.')
+        kind = text_field(data, 'kind', maximum=20, default='all')
+        try:
+            return self.telegram.store.user_report(owner, kind=kind)
+        except (ValueError, PermissionError) as exc:
+            raise RemoteError(str(exc)) from None
 
     def do_customer_save(self, data):
         self.telegram.store.ensure_customer(integer(data,'chat_id'),text_field(data,'name',maximum=120),restore=True)

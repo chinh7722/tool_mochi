@@ -634,6 +634,61 @@ class TelegramUserStore(CustomerAccountsMixin):
                     FROM mail_purchases GROUP BY job_id) p ON p.job_id=j.job_id
                 WHERE j.chat_id=? ORDER BY j.created_at DESC, j.job_id DESC''', (owner_id,)))
 
+    def _authorize_report_owner(self, connection, owner_id, actor_id):
+        if actor_id is not None:
+            actor = connection.execute('SELECT chat_id,role,active FROM users WHERE chat_id=?',
+                (_chat_id(actor_id),)).fetchone()
+            if actor is None or not actor['active'] or actor['role'] not in ('admin','partner'):
+                raise PermissionError('Bạn chưa được cấp quyền xuất báo cáo qua bot.')
+            if actor['role'] == 'partner' and owner_id != actor_id:
+                raise PermissionError('Partner chỉ được xuất báo cáo của chính mình.')
+            if owner_id == LOCAL_USER_ID:
+                raise PermissionError('Báo cáo Local chỉ xuất từ giao diện quản lý VPS.')
+            row = connection.execute('''SELECT u.chat_id,u.name,u.role,u.active FROM users u
+                WHERE u.chat_id=? AND (u.role='admin' OR (''' + self._PARTNER_FILTER + '))',
+                (owner_id,)).fetchone()
+        else:
+            row = connection.execute('SELECT chat_id,name,role,active FROM users WHERE chat_id=?',
+                (owner_id,)).fetchone()
+        if row is None:
+            raise ValueError('Không tìm thấy người dùng được phép xuất báo cáo.')
+        return dict(row)
+
+    def authorize_user_report(self, actor_id, owner_id):
+        """Fresh SQL permission check for each pending report file/retry."""
+        actor_id, owner_id = _chat_id(actor_id), _owner_id(owner_id)
+        with self._connection() as connection:
+            connection.execute('BEGIN')
+            self._authorize_report_owner(connection,owner_id,actor_id)
+            return True
+
+    def user_report(self, owner_id, *, actor_id=None, kind='all'):
+        """Export one consistent, credential-free history snapshot for one owner."""
+        from core.user_reports import build_user_report
+        owner_id = _owner_id(owner_id)
+        if actor_id is not None:
+            actor_id = _chat_id(actor_id)
+        if kind not in ('all','jobs','purchases'):
+            raise ValueError('Loại báo cáo phải là all, jobs hoặc purchases.')
+        with self._connection() as connection:
+            connection.execute('BEGIN')
+            owner = self._authorize_report_owner(connection,owner_id,actor_id)
+            jobs = connection.execute('''SELECT j.job_id,j.code,j.requested_beans,j.target_count,
+                j.status,j.dispatch_state,j.success_count,j.attempted_count,j.failure_count,
+                j.sale_rate_units,j.schedule_data,j.created_at,j.updated_at,j.finalized_at,j.scheduled_at,
+                co.order_id AS customer_order_id,co.reserved_units,co.charged_units,co.settled_at,
+                COALESCE(p.known_cost_units,0) AS known_cost_units,COALESCE(p.pending_costs,0) AS pending_costs
+                FROM jobs j LEFT JOIN customer_orders co ON co.job_id=j.job_id
+                LEFT JOIN (SELECT job_id,SUM(cost_units) AS known_cost_units,
+                    SUM(CASE WHEN cost_units IS NULL THEN 1 ELSE 0 END) AS pending_costs
+                    FROM mail_purchases GROUP BY job_id) p ON p.job_id=j.job_id
+                WHERE j.chat_id=? ORDER BY j.created_at DESC,j.job_id DESC''', (owner_id,))
+            purchases = connection.execute('''SELECT p.purchase_id,p.job_id,j.code,p.provider,p.product_id,
+                p.quantity,p.cost_units,p.balance_before_units,p.balance_after_units,p.order_id,p.source,
+                p.state,p.created_at,p.updated_at FROM mail_purchases p JOIN jobs j ON j.job_id=p.job_id
+                WHERE j.chat_id=? ORDER BY p.created_at DESC,p.purchase_id''', (owner_id,))
+            return build_user_report(owner,jobs,purchases,kind=kind)
+
     def invite_quota_history(self):
         """All confirmed successes, independent of final status or job owner."""
         with self._connection() as connection:

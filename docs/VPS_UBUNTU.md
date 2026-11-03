@@ -4,6 +4,10 @@
 hẹn giờ, SQLite và đồng bộ SePay chạy trong dịch vụ `hoshino` trên VPS.
 Đóng máy tính hoặc mất SSH tunnel không dừng job trên VPS.
 
+Có thêm [giao diện web local](WEB_LOCAL.md): chạy `Launch_Web_VPS_Manager.bat`
+trên Windows sau khi mở tunnel. Web dùng cùng API và dữ liệu, không cần cài web
+server hay mở thêm cổng trên VPS.
+
 ## Kiến trúc triển khai
 
 ```mermaid

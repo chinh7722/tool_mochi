@@ -657,3 +657,65 @@ Quy trình phát triển và hoàn thiện công cụ trải qua 8 vòng lặp (
   `THONG_BAO_TELEGRAM_2026-11-02.md`; đóng GUI Windows vẫn để VPS tiếp tục gửi.
   Rollout phải giữ bot/SePay và không restart khi còn job hoặc thông báo đang gửi.
 
+### Giao diện web local quản lý cùng VPS — 03/11/2026
+
+- Thêm `main_mochi_web.py` và `Launch_Web_VPS_Manager.bat`: mở trình duyệt mặc
+  định, phục vụ tại127.0.0.1:8787; giữ launcher mở, Ctrl+C dừng riêng web local.
+  Tham số `--port` đổi cổng; `--no-browser` phục vụ kiểm tra tự động.
+- `core/remote/local_web.py` (mirror src) là cầu nối HTTP local dùng thư viện
+  chuẩn và RemoteClient hiện có, không import Qt/runtime/runner/SQLite vận hành.
+  Dùng chung `data/remote_connection.json`; token chỉ ở Python local, không trả
+  cho browser. Kết nối mới xác minh với VPS trước khi lưu cấu hình atomic.
+- Server chỉ bind127.0.0.1, kiểm tra Host/Origin, bootstrap phiên qua fragment
+  được xóa sau khi mở, cookie HttpOnly/SameSite, CSRF choPOST, CSP chỉ tài nguyên
+  local, giới hạn body và mutation lock. API chỉ chuyển danh sách lệnh quản lý
+  hiện có, giữ UUID gốc, không tự retryPOST. ID/số dư lớn chuyểnlossless qua JS.
+- `web/index.html`, `style.css`, `app.js` giữ sidebar/logo/tông màu/bố cục tool,
+  sáu trang Dashboard/Mochi/hai poolproxy/Telegram/Cài đặt. Có combo/lịch/job/log/
+  CSV, lô mail, lấy mã, proxyTXT, bot/người nhận/người dùng/API riêng, khách/ví/
+  đơn/SePay và đối soát. Giữ bản nháp khipoll, người nhận theoID, money dùngBigInt.
+- Browser không có CDN/font/network ngoài localhost; Python chỉ gọi API qua
+  tunnel. Đóng tab/web local không gọi job.stop/telegram.stop/sepay.stop.
+  Không tạo Site cloud, không public web và không thay dịch vụ/cổng trên VPS.
+- Thêm server12 + Chrome17 ca: bảo vệphiên/origin/CSRF, chetoken, số lớn, nội dung
+  text, các thao tác chính, giữdraft, recipient, upload/download và đóngbrowser.
+  Previewfake ở1280×900/1120×760: `.tmp/web_*_1280.png`, `web_mochi_1120.png`.
+  Không mua mail, gửi Telegram hoặc thanh toán thật trong kiểm chứng.
+- Bổ sung web/HTML/CSS/JS và launcher vào source allowlist/zip; source root/src
+  đồng bộ. Hướng dẫn tại `docs/WEB_LOCAL.md`; cách mở phần mềm cũ giữ như trước.
+- Full regression Windows902 ca PASS. Smoke entrypoint bằng Python hệ thống
+  không dùng venv: HTML/JS trả200 ở127.0.0.1:8787. Không publish/host web online;
+  chỉ hoàn thiện source local và source archive, không restart dịch vụ VPS.
+
+### Báo cáo CSV theo người dùng — 03/11/2026
+
+- Thêm `core/user_reports.py` và `TelegramUserStore.user_report`: một bản chụp
+  SQLite nhất quán cho toàn bộ lịch sử job và giao dịch mua mail của một người.
+  Hai CSV riêng, UTF-8 BOM, tiêu đề tiếng Việt, giờ UTC+7; có trạng thái combo,
+  tiến độ, bean thực tế, doanh thu, chi phí, đối soát và các mốc thời gian.
+  Không lấy giới hạn 500 dòng của bảng giao diện, không xuất API key/token,
+  mật khẩu hoặc tài khoản mail đã mua. Giới hạn 6 MiB trả lỗi rõ ràng, không cắt dữ liệu.
+- Tiền dùng đơn vị nguyên của sổ để tránh sai số. Chi phí chưa xác định để trống;
+  tổng chi phí/lợi nhuận chỉ có khi đủ dữ liệu. Bean thực tế tính cả lượt thành công
+  trong job lỗi/hủy. Dữ liệu văn bản được bảo vệ khi mở trong bảng tính.
+- API `user.report` và cầu nối web local dùng cùng bộ xuất. Tool có nút
+  **Xuất báo cáo CSV**, lấy đúng dòng đang chọn, chọn thư mục một lần rồi ghi hai
+  file; tránh ghi đè và báo rõ nếu lưu chưa đủ. Web hiện hai nút **Tải CSV** cho
+  cùng bản chụp. Cả hai hỗ trợ Local và người đã thu hồi quyền.
+- Bot thêm `/baocao [CHAT_ID]`, alias `/report`. Admin active xuất được của mình,
+  partner và admin khác, kể cả lịch sử người đã thu hồi quyền. Partner active
+  chỉ xuất của mình. Kiểm tra quyền SQL khi tạo và ngay trước từng file/retry;
+  hạ quyền trong lúc chờ không làm lộ báo cáo của người khác.
+- Gửi tài liệu bằng multipart trong bộ nhớ, hàng đợi riêng có giới hạn. Chỉ thử
+  lại khi Telegram trả 429 rõ ràng; lỗi mạng không tự gửi lại tài liệu chưa biết
+  đã nhận hay chưa. Kiểm thử dùng dữ liệu và Telegram giả, không mua mail, gửi
+  báo cáo hay thanh toán thật.
+- Windows regression 959 ca PASS, cộng 2 ca HTTP/Qt/lưu file mới chạy riêng:
+  961 ca riêng biệt PASS. Bao gồm phân quyền, dữ liệu tiền, chống lộ bí mật,
+  replay UUID, chọn đúng người trên desktop/web và hai file BOM.
+  Ubuntu full regression 961 ca PASS. Preview 1120×760 xác nhận nút xuất không
+  bị cắt hoặc tạo cuộn ngang. Root/src đồng bộ byte. Rollout sao lưu dữ liệu,
+  giữ bot/SePay và đối chiếu các job combo đã hẹn; không host web lên VPS.
+  Hướng dẫn tại `BAO_CAO_CSV_THEO_NGUOI_DUNG_2026-11-03.md`
+  và `HUONG_DAN_SU_DUNG_PHAN_MEM_VA_WEB.md`.
+

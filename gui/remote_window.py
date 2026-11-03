@@ -4,6 +4,7 @@ from decimal import Decimal
 import csv
 import json
 from pathlib import Path
+import re
 
 from PySide6.QtCore import QDateTime, QSettings, Qt, QThread, QTimer, Signal, QSignalBlocker
 from PySide6.QtWidgets import (QAbstractItemView, QApplication, QCheckBox, QComboBox,
@@ -367,6 +368,80 @@ class RemoteMainWindow(QMainWindow):
             self.status.setText('Chọn đúng người dùng và Chat ID trước khi lưu API.'); return
         self.send('user.mail_keys',dict(chat_id=typed,gmailvip_key=self.user_gmail.text(),one_trieu_key=self.user_trieu.text()),
             lambda _:(self.user_gmail.clear(),self.user_trieu.clear()))
+
+    def export_user_report(self):
+        owner = self.selected(self.users,'chat_id')
+        if owner is not None:
+            self.send('user.report',{'chat_id':owner,'kind':'all'},
+                lambda result, expected=owner:self.save_user_report(result,expected_owner=expected))
+
+    def save_user_report(self,result,*,expected_owner=None):
+        """Save both CSVs into one chosen directory without overwriting older exports."""
+        self.status.setTextFormat(Qt.TextFormat.PlainText)
+        try:
+            owner=result['owner']
+            owner_id=owner['chat_id']
+            if type(owner_id) is not int or owner_id==0 or owner_id < -1:
+                raise ValueError()
+            if expected_owner is not None and owner_id!=expected_owner:
+                raise ValueError()
+            files=result['files']
+            if (not isinstance(owner,dict) or not isinstance(files,list) or len(files)!=2
+                    or {item.get('kind') for item in files}!={'jobs','purchases'}):
+                raise ValueError()
+            names=set()
+            content=[]
+            for item in files:
+                name,text=item.get('filename'),item.get('text')
+                if (not isinstance(name,str) or not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9_.-]{0,150}\.csv',name)
+                        or name.casefold() in names or not isinstance(text,str)):
+                    raise ValueError()
+                names.add(name.casefold())
+                content.append((name,text.lstrip('\ufeff').encode('utf-8-sig')))
+            if sum(len(raw) for _,raw in content)>8*1024*1024:
+                raise ValueError()
+        except (KeyError,ValueError,TypeError,AttributeError):
+            self.status.setText('Báo cáo CSV từ VPS không hợp lệ; chưa lưu file.')
+            return
+        directory=QFileDialog.getExistingDirectory(self,
+            f'Lưu báo cáo CSV — {owner.get("name", "")} ({owner_id})')
+        if not directory:
+            self.status.setText('Đã hủy lưu báo cáo CSV.')
+            return
+        from PySide6.QtCore import QSaveFile,QIODevice
+        prepared=[]
+        saved=[]
+        try:
+            folder=Path(directory).resolve()
+            if not folder.is_dir():
+                raise OSError()
+            occupied={item.name.casefold() for item in folder.iterdir()}
+            for name,raw in content:
+                candidate=name
+                number=2
+                while candidate.casefold() in occupied:
+                    candidate=f'{Path(name).stem}_{number}.csv'
+                    number+=1
+                occupied.add(candidate.casefold())
+                target=QSaveFile(str(folder/candidate))
+                prepared.append((target,candidate))
+                if not target.open(QIODevice.OpenModeFlag.WriteOnly) or target.write(raw)!=len(raw):
+                    raise OSError()
+            for target,name in prepared:
+                if not target.commit():
+                    raise OSError()
+                saved.append(name)
+        except Exception:
+            for target,name in prepared:
+                if name not in saved:
+                    target.cancelWriting()
+            if saved:
+                self.status.setText(f'Đã lưu {len(saved)}/2 file CSV: '+', '.join(saved)+
+                    '. Chưa lưu đủ báo cáo; kiểm tra quyền ghi hoặc file đang mở.')
+            else:
+                self.status.setText('Chưa lưu được báo cáo CSV. Kiểm tra quyền ghi hoặc file đang mở.')
+            return
+        self.status.setText(f'Đã lưu 2 báo cáo CSV của {owner.get("name", "")} ({owner_id}) tại {folder}.')
 
     def save_bot(self):
         self.send('telegram.save',{'token':self.bot_token.text(),'auto_start':self.bot_auto.isChecked()},lambda _:self.bot_token.clear())

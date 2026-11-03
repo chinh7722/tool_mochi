@@ -373,6 +373,7 @@ def build_telegram_page(window):
     _danger(w.button('Thu hồi quyền',lambda:w.selected_send(w.users,'chat_id','user.active',{'active':False}),actions))
     w.button('Khôi phục quyền',lambda:w.selected_send(w.users,'chat_id','user.active',{'active':True}),actions)
     w.button('Xem job',lambda:w.selected_details(w.users,'chat_id','user.jobs'),actions)
+    w.export_user_report_button=w.button('Xuất báo cáo CSV',w.export_user_report,actions)
     actions.addStretch()
     users_box.addLayout(actions)
     w.users=table(['Chat ID','Tên','Vai trò','Quyền truy cập','Job\nhoàn thành','Job\nthất bại',

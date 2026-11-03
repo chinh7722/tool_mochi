@@ -213,6 +213,7 @@ class TelegramPage(QWidget):
             '/mailapi KEY_GMAILVIP KEY_1TRIEUMAIL — lưu đủ 2 API riêng cho admin/partner; /mailapi — xem trạng thái\n'
             '/hen MÃ_MỜI SỐ_BEAN DD/MM/YYYY HH:MM — hẹn giờ Việt Nam · /lich — xem lịch · /huy MÃ_JOB — hủy job chưa chạy\n'
             'Admin: /partner_add CHAT_ID TÊN · /partner_remove CHAT_ID · /partners [TRANG] · /partner CHAT_ID\n'
+            '/baocao [CHAT_ID] — xuất CSV mua mail và job; partner chỉ xuất của mình\n'
             'Ví dụ: /job VBRN5H 1000 Khách A. Bot chỉ nhận chat riêng khi tool đang mở; '
             'lệnh tồn lúc bot tắt được bỏ qua. Job dùng cấu hình trong Cài đặt chung.', bot_card)
         help_text.setWordWrap(True)
@@ -1333,6 +1334,20 @@ class TelegramPage(QWidget):
             return
         if request.action in ('partner_add','partner_remove','partner_list','partner_info'):
             self._on_partner_control(worker,request,actor)
+            return
+        if request.action=='user_report':
+            target=request.target_chat_id if request.target_chat_id is not None else actor.chat_id
+            try:
+                report=self.store.user_report(target,actor_id=actor.chat_id,kind='all')
+                sender=getattr(worker,'send_report',None)
+                if not callable(sender) or not sender(actor.chat_id,report,request.update_id,
+                        target_id=target,admin_only=target!=actor.chat_id,
+                        authorize=self.store.authorize_user_report):
+                    raise ValueError('Bot chưa sẵn sàng gửi báo cáo; vui lòng thử lại sau.')
+            except (PermissionError,ValueError) as exc:
+                worker.reply(actor.chat_id,str(exc),request.update_id)
+            except Exception:
+                worker.reply(actor.chat_id,'Không xuất được báo cáo. Nhờ quản trị viên kiểm tra dữ liệu trên VPS.',request.update_id)
             return
         if request.action in ('mail_keys_status','mail_keys_save'):
             try:

@@ -6,14 +6,17 @@
 !/*.md
 !/main_mochi_gui.py
 !/main_mochi_server.py
+!/main_mochi_web.py
 !/cli_mochi.py
 !/Launch_*Tool.bat
 !/Launch_VPS_Manager.bat
+!/Launch_Web_VPS_Manager.bat
 !/Open_VPS_Tunnel.bat
 !/requirements*.txt
 !/core/
 !/gui/
 !/src/
+!/web/
 !/tests/
 !/scripts/
 !/deploy/
