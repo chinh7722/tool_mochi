@@ -719,3 +719,19 @@ Quy trình phát triển và hoàn thiện công cụ trải qua 8 vòng lặp (
   Hướng dẫn tại `BAO_CAO_CSV_THEO_NGUOI_DUNG_2026-11-03.md`
   và `HUONG_DAN_SU_DUNG_PHAN_MEM_VA_WEB.md`.
 
+### Chờ 10 giây sau mua mail thất bại — 03/11/2026
+
+- `purchase_policy.MIN_FAILED_PURCHASE_INTERVAL=10`: mọi lần thử lại sau shop
+  giới hạn tốc độ chờ tối thiểu 10 giây; tôn trọng `Retry-After` dài hơn và vẫn
+  giới hạn ba lần. Thời gian phục hồi proxy được tính trong khoảng chờ này.
+- Giao dịch lỗi giữ cooldown cùng shop/API key cho yêu cầu tiếp theo, kể cả
+  job khác. Hết hàng khi chuyển sản phẩm cùng shop dùng cooldown này; chuyển
+  mục ưu tiên giữa hai shop cũng chờ 10 giây trước khi mua tiếp.
+- Chờ bất đồng bộ, hủy được; không tạo thêm retry cho giao dịch mất phản hồi,
+  API key/số dư sai hoặc dữ liệu mail mâu thuẫn. Giữ cơ chế đối soát hiện có.
+- Thêm tám ca dùng đồng hồ giả: khoảng cách giữa POST, Retry-After, phục hồi
+  proxy, chuyển sản phẩm/shop, cooldown sau lượt cuối, mất phản hồi và hủy khi
+  đang chờ. Windows 111 ca liên quan PASS (mail_batches41, multi_shop19,
+  invite_probe_mail_proxy27, finance24); cả 111 ca này cũng PASS trên Ubuntu.
+  Root/src đồng bộ byte; không mua mail thật.
+

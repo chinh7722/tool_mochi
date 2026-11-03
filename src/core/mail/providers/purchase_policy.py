@@ -15,6 +15,7 @@ from core.mail.providers.priority import is_product_unavailable
 
 
 MIN_PURCHASE_INTERVAL = 1.0
+MIN_FAILED_PURCHASE_INTERVAL = 10.0
 MAX_PURCHASE_ATTEMPTS = 3
 MAX_RETRY_WAIT = 60.0
 _logger = logging.getLogger(__name__)
@@ -75,7 +76,13 @@ def retry_wait(response: Any, data: dict, attempt: int) -> float:
                 pass
     if delay is None or not math.isfinite(delay) or delay < 0:
         delay = 3.0 * attempt
-    return max(MIN_PURCHASE_INTERVAL, delay)
+    return max(MIN_PURCHASE_INTERVAL, MIN_FAILED_PURCHASE_INTERVAL, delay)
+
+
+async def wait_for_purchase_retry(callback=None):
+    """Pace stock fallback even when the next choice uses another shop/key."""
+    notify_wait(callback, f'Mua mail chưa thành công; chờ {MIN_FAILED_PURCHASE_INTERVAL:.0f}s trước yêu cầu mua tiếp theo.')
+    await asyncio.sleep(MIN_FAILED_PURCHASE_INTERVAL)
 
 
 class _PurchaseSlot:
@@ -125,9 +132,15 @@ async def purchase_json(session, url, payload, domain, api_key, on_wait=None, on
     async with purchase_gate(domain, api_key, on_wait) as slot:
         for attempt in range(1, MAX_PURCHASE_ATTEMPTS + 1):
             await slot.before_request(on_wait)
-            async with (purchase_route() if purchase_route is not None else _same_session(session)) as connection:
-                data,response=await _purchase_once(connection,url,payload,balance_probe,on_transaction)
+            try:
+                async with (purchase_route() if purchase_route is not None else _same_session(session)) as connection:
+                    data,response=await _purchase_once(connection,url,payload,balance_probe,on_transaction)
+            except Exception:
+                slot.defer(MIN_FAILED_PURCHASE_INTERVAL)
+                raise
             if not is_rate_limit_rejection(data):
+                if data.get('status') != 'success':
+                    slot.defer(MIN_FAILED_PURCHASE_INTERVAL)
                 return data
             delay = retry_wait(response, data, attempt)
             message = str(data.get('msg') or 'Thao tác quá nhanh, vui lòng chờ')

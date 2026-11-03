@@ -5,6 +5,10 @@
 > Bot dùng `/baocao`: partner xuất của mình; admin dùng `/baocao CHAT_ID` để xuất
 > lịch sử job và mua mail của partner hoặc admin khác.
 
+> **Chờ mua lại mail:** sau khi shop từ chối, lần thử lại hoặc chuyển sản phẩm/shop
+> vì hết hàng chờ tối thiểu **10 giây**. Nếu `Retry-After` dài hơn thì chờ theo shop.
+> Mất phản hồi giao dịch vẫn dừng để đối soát, tránh mua trùng.
+
 > **[Hướng dẫn sử dụng phần mềm và web](HUONG_DAN_SU_DUNG_PHAN_MEM_VA_WEB.md):**
 > cách mở, kết nối VPS, tạo job/combo, proxy, Telegram, khách hàng, SePay và xử lý lỗi.
 

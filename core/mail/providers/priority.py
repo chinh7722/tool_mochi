@@ -67,6 +67,7 @@ async def buy_priority_batch(priority, api_keys, amount, *, provider_types=None,
     """Try the whole requested batch in priority order; stop after first paid success."""
     if type(amount) is not int or amount <= 0:
         raise ValueError('Số lượng mail phải là số nguyên dương.')
+    from core.mail.providers.purchase_policy import wait_for_purchase_retry
     if provider_types is None:
         from core.mail.providers.gmailvip_vn import GmailVipVn
         from core.mail.providers.one_trieu_mail import OneTrieuMail
@@ -77,7 +78,7 @@ async def buy_priority_batch(priority, api_keys, amount, *, provider_types=None,
             raise ValueError(f'Chưa nhập API key {SHOP_NAMES[choice.provider]}. Chưa mua mail.')
     errors = []
     current_proxy = proxy
-    for choice in choices:
+    for index, choice in enumerate(choices):
         if on_choice is not None:
             on_choice(f'Thử {choice.label}, số lượng {amount} mail...')
         async def rotate():
@@ -100,5 +101,7 @@ async def buy_priority_batch(priority, api_keys, amount, *, provider_types=None,
             errors.append(choice.label)
             if on_choice is not None:
                 on_choice(f'{choice.label} không đủ hàng/sản phẩm không còn; chuyển mục ưu tiên tiếp theo.')
+            if index + 1 < len(choices):
+                await wait_for_purchase_retry(on_wait or on_choice)
     raise MailProductUnavailable('Tất cả mục ưu tiên đều chưa mua được do hết hàng hoặc sản phẩm không còn: '
         + ', '.join(errors))

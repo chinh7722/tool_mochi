@@ -462,7 +462,8 @@ class MailPoolTests(unittest.IsolatedAsyncioTestCase):
         with patch('core.mail.providers.gmailvip_vn.AsyncSession',return_value=unused), \
                 patch('core.mail.providers.one_trieu_mail.AsyncSession',return_value=unused), \
                 patch('core.mail.proxy_pool.AsyncSession',side_effect=connection_factory), \
-                patch.object(policy._PurchaseSlot,'before_request',new=AsyncMock()):
+                patch.object(policy._PurchaseSlot,'before_request',new=AsyncMock()), \
+                patch.object(policy,'wait_for_purchase_retry',new=AsyncMock()):
             result=await runner.run('priority-probe','TEST',10)
         self.assertEqual(result.status,'completed')
         self.assertEqual(calls,[('gmailvip.vn',1),('1trieumail.com',1),('gmailvip.vn',9),('1trieumail.com',9)])

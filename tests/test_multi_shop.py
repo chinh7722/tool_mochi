@@ -72,6 +72,9 @@ class MultiPurchaseTests(unittest.IsolatedAsyncioTestCase):
         self.pace = patch.object(policy._PurchaseSlot, 'before_request', AsyncMock())
         self.pace.start()
         self.addCleanup(self.pace.stop)
+        wait = patch.object(policy, 'wait_for_purchase_retry', new=AsyncMock())
+        wait.start()
+        self.addCleanup(wait.stop)
 
     async def test_interleaved_priority_uses_correct_key_id_quantity_and_stops_at_first_success(self):
         first = session({'status': 'error', 'msg': 'Sản phẩm hết hàng'})

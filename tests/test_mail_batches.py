@@ -361,7 +361,7 @@ class PurchasePolicyTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(len(result), 10)
             self.assertEqual(session.post.await_count, 2)
             self.assertTrue(all(c.kwargs['data']['id'] == 18551 and c.kwargs['data']['amount'] == 10 for c in session.post.await_args_list))
-            defer.assert_called_once_with(9.0)
+            defer.assert_called_once_with(10.0)
 
     async def test_rate_limit_exhaustion_stops_without_changing_products(self):
         for provider in (GmailVipVn, OneTrieuMail):
@@ -524,7 +524,7 @@ class PurchaseGateTests(unittest.IsolatedAsyncioTestCase):
 
         old, new = SimpleNamespace(post=rejected), SimpleNamespace(post=accepted)
         recover = AsyncMock(return_value=new)
-        with patch.object(policy, 'MIN_PURCHASE_INTERVAL', 0):
+        with patch.object(policy, 'MIN_PURCHASE_INTERVAL', 0), patch.object(policy, 'MIN_FAILED_PURCHASE_INTERVAL', 0):
             await policy.purchase_json(old, 'offline', {'id': 1, 'amount': 10},
                 'offline-shop', 'same-key', on_rate_limit=recover)
         recover.assert_awaited_once()
@@ -554,11 +554,131 @@ class PurchaseGateTests(unittest.IsolatedAsyncioTestCase):
                 if len(times) == 1 else response({'status': 'success', 'data': []}))
 
         session = SimpleNamespace(post=post)
-        with patch.object(policy, 'MIN_PURCHASE_INTERVAL', 0), patch.object(policy, 'MAX_PURCHASE_ATTEMPTS', 1):
+        with patch.object(policy, 'MIN_PURCHASE_INTERVAL', 0), patch.object(policy, 'MIN_FAILED_PURCHASE_INTERVAL', 0), patch.object(policy, 'MAX_PURCHASE_ATTEMPTS', 1):
             with self.assertRaises(policy.PurchaseRateLimitError):
                 await policy.purchase_json(session, 'offline', {'id': 1, 'amount': 10}, 'offline-shop', 'same-key')
             await policy.purchase_json(session, 'offline', {'id': 1, 'amount': 10}, 'offline-shop', 'same-key')
         self.assertGreaterEqual(times[1] - times[0], 0.018)
+
+
+class PurchaseRetryTimingTests(unittest.IsolatedAsyncioTestCase):
+    async def asyncSetUp(self):
+        policy._slots.clear()
+        self.clock = 1000.0
+        self.waits = []
+        self.posts = []
+        for provider in (GmailVipVn, OneTrieuMail):
+            provider.clear_seen_cache()
+        timer = patch.object(policy, 'time', SimpleNamespace(monotonic=lambda: self.clock))
+        timer.start()
+        self.addCleanup(timer.stop)
+        sleeper = patch.object(policy.asyncio, 'sleep', side_effect=self.sleep)
+        sleeper.start()
+        self.addCleanup(sleeper.stop)
+
+    async def sleep(self, delay):
+        self.waits.append(delay)
+        self.clock += delay
+
+    def connection(self, replies):
+        async def post(*args, **kwargs):
+            self.posts.append(self.clock)
+            reply = replies.pop(0)
+            if isinstance(reply, Exception):
+                raise reply
+            return response(reply)
+        return SimpleNamespace(post=post, close=AsyncMock())
+
+    async def test_retry_after_has_ten_second_floor_and_honors_longer_shop_wait(self):
+        for raw, expected in ((None, 10), ('0', 10), ('9', 10), ('20', 20), ('invalid', 10)):
+            headers = {} if raw is None else {'Retry-After': raw}
+            self.assertEqual(policy.retry_wait(response({}, headers), {}, 1), expected)
+
+    async def test_each_rejected_rate_attempt_waits_ten_seconds_before_next_post(self):
+        connection = self.connection([
+            {'status': 'error', 'msg': 'Thao tác quá nhanh'},
+            {'status': 'error', 'msg': 'Thao tác quá nhanh'},
+            {'status': 'success', 'data': []},
+        ])
+        await policy.purchase_json(connection, 'offline', {'id': 1, 'amount': 10}, 'shop', 'key')
+        self.assertEqual(self.posts, [1000, 1010, 1020])
+        self.assertEqual(self.waits, [10, 10])
+
+    async def test_proxy_recovery_time_counts_toward_ten_second_wait(self):
+        old = self.connection([{'status': 'error', 'msg': 'Thao tác quá nhanh'}])
+        new = self.connection([{'status': 'success', 'data': []}])
+        async def recover():
+            self.clock += 3
+            return new
+        await policy.purchase_json(old, 'offline', {'id': 1, 'amount': 10}, 'shop', 'key', on_rate_limit=recover)
+        self.assertEqual(self.posts, [1000, 1010])
+        self.assertEqual(self.waits, [7])
+
+    async def test_stock_fallback_within_each_shop_waits_ten_seconds(self):
+        for provider in (GmailVipVn, OneTrieuMail):
+            policy._slots.clear()
+            self.clock = 1000
+            self.posts.clear()
+            client = provider('offline')
+            client._session = self.connection([
+                {'status': 'error', 'msg': 'Hết hàng'},
+                {'status': 'success', 'data': ['retry-timing@example.test|pw']},
+            ])
+            result = await client.buy_gmail_domain_info([1, 2], 1)
+            self.assertEqual(len(result), 1)
+            self.assertEqual(self.posts, [1000, 1010])
+
+    async def test_cross_shop_stock_fallback_waits_before_each_new_request(self):
+        from core.mail.providers.priority import buy_priority_batch, GMAILVIP, ONE_TRIEU
+        first = self.connection([{'status': 'error', 'msg': 'Hết hàng'}])
+        second = self.connection([{'status': 'error', 'msg': 'Hết hàng'}])
+        third = self.connection([{'status': 'success', 'data': ['cross-retry@example.test|pw']}])
+        with patch('core.mail.providers.gmailvip_vn.AsyncSession', side_effect=[first, third]), \
+                patch('core.mail.providers.one_trieu_mail.AsyncSession', return_value=second):
+            result = await buy_priority_batch('gmailvip:1,1trieumail:2,gmailvip:3',
+                {GMAILVIP: 'offline', ONE_TRIEU: 'offline'}, 1)
+        self.assertEqual(len(result), 1)
+        self.assertEqual(self.posts, [1000, 1010, 1020])
+        self.assertEqual(self.waits, [10, 10])
+
+    async def test_final_rate_rejection_preserves_ten_second_cooldown_for_next_job(self):
+        connection = self.connection([
+            {'status': 'error', 'msg': 'Thao tác quá nhanh'},
+            {'status': 'success', 'data': []},
+        ])
+        with patch.object(policy, 'MAX_PURCHASE_ATTEMPTS', 1):
+            with self.assertRaises(policy.PurchaseRateLimitError):
+                await policy.purchase_json(connection, 'offline', {'id': 1, 'amount': 1}, 'shop', 'key')
+        await policy.purchase_json(connection, 'offline', {'id': 1, 'amount': 1}, 'shop', 'key')
+        self.assertEqual(self.posts, [1000, 1010])
+
+    async def test_lost_response_stops_but_next_explicit_request_respects_cooldown(self):
+        connection = self.connection([TimeoutError('lost response'), {'status': 'success', 'data': []}])
+        with self.assertRaisesRegex(ValueError, 'Không xác định'):
+            await policy.purchase_json(connection, 'offline', {'id': 1, 'amount': 1}, 'shop', 'key')
+        self.assertEqual(len(self.posts), 1)
+        await policy.purchase_json(connection, 'offline', {'id': 1, 'amount': 1}, 'shop', 'key')
+        self.assertEqual(self.posts, [1000, 1010])
+
+    async def test_cancel_during_stock_wait_never_buys_next_shop(self):
+        from core.mail.providers.priority import buy_priority_batch, GMAILVIP, ONE_TRIEU
+        waiting = asyncio.Event()
+        async def pause(delay):
+            self.assertEqual(delay, 10)
+            waiting.set()
+            await asyncio.Event().wait()
+        first = self.connection([{'status': 'error', 'msg': 'Hết hàng'}])
+        with patch.object(policy.asyncio, 'sleep', side_effect=pause), \
+                patch('core.mail.providers.gmailvip_vn.AsyncSession', return_value=first), \
+                patch('core.mail.providers.one_trieu_mail.AsyncSession') as other:
+            task = asyncio.create_task(buy_priority_batch('gmailvip:1,1trieumail:2',
+                {GMAILVIP: 'offline', ONE_TRIEU: 'offline'}, 1))
+            await asyncio.wait_for(waiting.wait(), 1)
+            task.cancel()
+            with self.assertRaises(asyncio.CancelledError):
+                await task
+            other.assert_not_called()
+        self.assertEqual(self.posts, [1000])
 
 
 if __name__ == '__main__':

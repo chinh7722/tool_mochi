@@ -23,7 +23,7 @@ Tool yêu cầu API key cho những shop xuất hiện trong danh sách. Hai key
 - Sau một lần mua thành công, tool lưu lô và bắt đầu sử dụng. Nếu shop trả thiếu, tool dùng số mail đã nhận và giữ nguyên quy tắc không tự mua bù. Nếu trả dư, toàn bộ mail được lưu, job chỉ sử dụng đủ mục tiêu.
 - Khi tất cả mục đều hết hàng, job dừng và báo các mục đã thử.
 - Lỗi API key, mất phản hồi giao dịch, phản hồi không rõ ràng hoặc số dư sau giao dịch chưa xác minh được sẽ dừng mua để kiểm tra lịch sử shop. Không tự đặt thêm một lô ở shop khác trong những trường hợp này.
-- Giới hạn tốc độ vẫn chờ và thử lại cùng sản phẩm/lô theo cơ chế hiện có, tối đa ba lần; bật mua mail qua proxy thì callback phục hồi xoay/cấp lại proxy. Dùng proxy vừa phục hồi cho mục ưu tiên tiếp theo nếu sản phẩm sau đó báo hết hàng.
+- Khi shop giới hạn tốc độ, chờ ít nhất **10 giây** trước lần thử lại cùng sản phẩm/lô, tối đa ba lần; `Retry-After` dài hơn thì chờ theo shop. Chuyển sản phẩm/shop vì hết hàng cũng chờ 10 giây. Bật mua mail qua proxy thì callback phục hồi xoay/cấp lại proxy; thời gian phục hồi được tính trong khoảng chờ thử lại cùng shop. Dùng proxy vừa phục hồi cho mục ưu tiên tiếp theo nếu sản phẩm sau đó báo hết hàng.
 
 Chi phí được ghi theo đúng shop và số tiền thực tế bị trừ, gắn với người sở hữu job Local hoặc Telegram. Chọn **Dùng lô mail đã mua** vẫn đọc file JSON cũ và bỏ qua việc mua mới.
 

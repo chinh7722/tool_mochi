@@ -123,6 +123,12 @@ gmailvip:3445, 1trieumail:3423
 Khi sửa cấu hình, các ô API chung để trống sẽ giữ key đã lưu trên VPS.
 Đơn giá được chốt cho từng job khi tạo; thay đổi đơn giá áp dụng cho job mới.
 
+Khi mua mail bị giới hạn tốc độ, hệ thống chờ ít nhất **10 giây** rồi thử lại
+cùng sản phẩm/lô, tối đa ba lần. Chuyển sản phẩm hoặc shop vì hết hàng cũng
+chờ 10 giây trước khi mua tiếp. Nếu shop yêu cầu chờ lâu hơn thì theo shop.
+Trường hợp mất phản hồi, chưa biết giao dịch có trừ tiền hay không, job dừng
+để đối soát.
+
 ### Đường mạng và số luồng
 
 Tại **Hạ tầng chung**, chọn các bước dùng proxy: đăng nhập Google, đăng nhập
