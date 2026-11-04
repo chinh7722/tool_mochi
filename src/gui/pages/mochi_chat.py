@@ -294,9 +294,14 @@ class MochiWorkerThread(QThread):
         self._loop: Optional[asyncio.AbstractEventLoop] = None
         self._main_task: Optional[asyncio.Task] = None
         self._cancel_event = threading.Event()
+        self._pause_event = threading.Event()
+        self.runner.pause_event=self._pause_event
         self.runner.cancel_event = self._cancel_event
         self.runner.log_sink = lambda evt: self.log_signal.emit(evt, self.job_id)
         self.runner.progress_sink = lambda evt: self.progress_signal.emit(evt)
+
+    def request_pause(self):
+        self._pause_event.set()
 
     def request_cancel(self):
         if self._cancel_event.is_set():
@@ -1781,6 +1786,8 @@ class MochiChatPage(QWidget):
             mail_proxy_pool=mail_proxy_pool,
             invite_quota_store=self.invite_quota_store,
             failure_budget_used=record.failure_count if record.combo else 0,
+            resume_mail_batch=getattr(record,'resume_mail_batch',None) if getattr(record,'stock_account_id',None) else None,
+            failure_streak=getattr(record,'priority_failure_streak',0),
         )
         if mail_proxy_pool is not None:
             mail_proxy_pool.on_wait=lambda message:runner._emit_log(job_id,message)
@@ -1872,6 +1879,9 @@ class MochiChatPage(QWidget):
         record.source_mail_batch = data.get('source_mail_batch')
         record.mail_product_ids = data.get('mail_product_ids')
         record.stock_account_id = data.get('stock_account_id')
+        record.resume_mail_batch=data.get('resume_mail_batch') or None
+        record.priority_paused=data.get('priority_paused',False)
+        record.priority_failure_streak=data.get('priority_failure_streak',0)
         record.total_vnd = int(data.get('total_vnd') or 0)
         record.combo = data.get('combo', False) is True
         record.success_count = int(job.get('success_count') or 0)
@@ -1884,6 +1894,7 @@ class MochiChatPage(QWidget):
                 self.invite_quota_store.job_success_count(record.invite_code, job_id))
             record.attempted_count = max(record.attempted_count, record.success_count)
             record.status = 'Chờ lượt combo'
+        if record.priority_paused:record.status='Tạm dừng ưu tiên khách'
         self._session_jobs[job_id] = record
         self._scheduled_jobs[job_id] = record
         if record.combo:
@@ -1902,7 +1913,10 @@ class MochiChatPage(QWidget):
             if record.scheduled_at <= now and jid not in self._workers]
         if not due:
             return
-        for job_id, record in sorted(due, key=lambda pair: pair[1].scheduled_at):
+        from gui.job_priority import customer_pending,is_stock,request_stock_pause
+        if customer_pending(self,now):request_stock_pause(self)
+        for job_id, record in sorted(due, key=lambda pair: (is_stock(pair[1]),pair[1].scheduled_at)):
+            if is_stock(record) and customer_pending(self,now):continue
             record._statistics_round_id = 'scheduled:'+record.scheduled_at.isoformat()
             try:
                 if self.scheduled_job_claim is None:
@@ -1946,6 +1960,8 @@ class MochiChatPage(QWidget):
                 getattr(self, name).setText(text)
 
     def job_dispatch_text(self, job_id):
+        if getattr(self._session_jobs.get(job_id),'priority_paused',False):
+            return 'Tạm dừng ưu tiên khách; tự tiếp tục khi hết job khách đang chạy/chờ.'
         if job_id in self._scheduled_jobs:
             record = self._scheduled_jobs[job_id]
             return ('Combo chạy tiếp: ' if record.combo else 'Hẹn giờ: ') + schedule_text(record.scheduled_at)
@@ -1962,13 +1978,22 @@ class MochiChatPage(QWidget):
             return
         self._dispatching_jobs = True
         try:
+            from gui.job_priority import customer_pending,is_stock,request_stock_pause
+            if customer_pending(self):
+                request_stock_pause(self)
+                stock=getattr(self,'stock_controller',None)
+                if (any(is_stock(self._session_jobs.get(jid)) for jid in self._active_job_ids)
+                        or stock is not None and stock.worker is not None):return
+            self._pending_jobs=deque(sorted(self._pending_jobs,key=lambda jid:is_stock(self._session_jobs.get(jid))))
             while self._pending_jobs and len(self._active_job_ids) < self.spin_job_concurrency.value():
+                if is_stock(self._session_jobs.get(self._pending_jobs[0])) and customer_pending(self):break
                 job_id = self._pending_jobs.popleft()
                 worker = self._workers.get(job_id)
                 if worker is None:
                     continue
                 self._active_job_ids.add(job_id)
                 self._session_jobs[job_id].status = 'Đang chạy'
+                self._session_jobs[job_id].priority_paused=False
                 try:
                     worker.start()
                 except Exception as exc:
@@ -2139,6 +2164,9 @@ class MochiChatPage(QWidget):
 
     def _reschedule_combo(self, record, *, limited=True):
         """Commit the next round before announcing it or releasing its customer hold."""
+        if getattr(record,'stock_account_id',None):
+            from gui.job_priority import save_resume_state
+            save_resume_state(self,record)
         when = datetime.now(VIETNAM_TIME) + (timedelta(hours=24,minutes=1)
             if limited else timedelta(minutes=1))
         if limited:
@@ -2178,8 +2206,16 @@ class MochiChatPage(QWidget):
             record.success_count = max(record.success_count,summary.success_count)
             record.failure_count = max(record.failure_count,summary.failure_count)
             record.attempted_count = max(record.attempted_count,summary.attempted_count)
+            if summary.status=='paused' and record.combo_cancel_requested:summary=replace(summary,status='cancelled')
             if record.failure_count>=5 and summary.status not in ('completed','cancelled'):
                 summary=replace(summary,status='failed',error_message='Đạt giới hạn tổng 5 lỗi trong job.')
+            if summary.status=='paused' and getattr(record,'stock_account_id',None) and not record.combo_cancel_requested:
+                try:
+                    from gui.job_priority import save_stock_pause
+                    save_stock_pause(self,record)
+                    return
+                except Exception:
+                    summary=replace(summary,status='failed',error_message='Không lưu được tiến độ tạm dừng. Kiểm tra VPS trước khi tiếp tục.')
             if self.job_run_recorder is not None:
                 from core.job_failure import job_failure_reason
                 try:

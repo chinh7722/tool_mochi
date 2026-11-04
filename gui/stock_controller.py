@@ -25,6 +25,7 @@ class StockController(QObject):
         self.store = StockAccountStore(Path(directory)/'stock_accounts.sqlite3')
         self.store.recover()
         self.worker = None
+        self.phase=None
         self.closing = False
         self.last_error = ''
         self.log_line.connect(lambda jid, line:self.m._append_log_line(line, job_id=jid))
@@ -61,19 +62,22 @@ class StockController(QObject):
                 raise ValueError('Product ID phải là số dương hoặc danh sách số, phân cách bằng dấu phẩy.')
             (parse_1trieumail_product_ids if provider == ONE_TRIEU else parse_gmailvip_product_ids)(product_ids)
             if not keys.get(provider):
-                raise ValueError('Nhập API mua mail tạo acc riêng cho shop đang chọn; không dùng API nhập mã mời để thay thế.')
+                raise ValueError('Nhập API mua mail tạo acc cho shop đang chọn; key có thể trùng API nhập mã mời.')
         return provider, dict(keys)
 
-    def _start(self, factory, error, on_result=None):
+    def _start(self, factory, error, on_result=None, on_finished=None):
         worker = AsyncTaskThread(factory, self)
         self.worker = worker
         worker.failed.connect(lambda _raw:error())
         if on_result is not None:worker.result.connect(on_result)
         def finished():
             self.worker = None
+            self.phase=None
+            if on_finished is not None:on_finished()
             worker.factory = None
             worker.deleteLater()
             self.changed.emit()
+            self.m._drain_job_queue()
         worker.finished.connect(finished)
         worker.start()
 
@@ -82,6 +86,10 @@ class StockController(QObject):
             return
         try:
             self._sync_jobs()
+            from gui.job_priority import customer_pending
+            if customer_pending(self.m):
+                self.m._drain_job_queue()
+                return
             if self.worker is not None:
                 return
             # Account preparation shares the VPS job capacity, and waits for queued invite work.
@@ -129,6 +137,7 @@ class StockController(QObject):
             self.store.batch_update(batch['id'], 'uncertain',
                 'Không xác nhận được giao dịch. Đối soát shop/lô đã lưu; không tự mua lại.')
             self.t.store.finish_job(batch['id'],'failed',0)
+        self.phase='buy'
         self._start(execute,failed)
 
     def _login(self, row):
@@ -159,7 +168,16 @@ class StockController(QObject):
         def failed():
             self.store.update(row['id'], status='creation_failed', message='Không đăng nhập/lấy mã được. Sửa kết nối rồi bấm Thử tạo lại lô; không mua mail mới.')
             self._finish_batch(row['batch_id'])
-        self._start(execute, failed,lambda _r:self._finish_batch(row['batch_id']))
+        self.phase='login'
+        def stopped():
+            current=next((r for r in self.store.all(internal=True) if r['id']==row['id']),None)
+            if current and current['status']=='logging_in':
+                self.store.update(row['id'],status='creating',message='Chờ tiếp tục tạo acc sau job khách.')
+        self._start(execute, failed,lambda _r:self._finish_batch(row['batch_id']),stopped)
+
+    def pause_preparation(self):
+        # OAuth/profile lookup may be cancelled safely. An in-flight paid purchase must settle first.
+        if self.worker is not None and self.phase=='login':self.worker.request_cancel()
 
     def _finish_batch(self, bid):
         rows = [r for r in self.store.all(internal=True) if r['batch_id']==bid]
@@ -237,8 +255,10 @@ class StockController(QObject):
                     status, next_at = ('ready' if job.status=='completed' else 'failed'), None
                 self.store.update(row['id'], beans=beans, status=status, next_at=next_at, job_id=None,
                     message='Job tích bean: '+job.status)
-            elif beans != row['beans']:
-                self.store.update(row['id'], beans=beans)
+            else:
+                record=self.m._session_jobs.get(row['job_id'])
+                status=('priority_wait' if getattr(record,'priority_paused',False) else 'accumulating') if row['status']!='stopping' else row['status']
+                if beans!=row['beans'] or status!=row['status']:self.store.update(row['id'],beans=beans,status=status)
 
     def stop(self, ids):
         selected_ids(ids)

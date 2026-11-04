@@ -1,5 +1,9 @@
 # Tạo acc tích bean và quản lý kho tài khoản
 
+> API tạo acc và API nhập mã mời **được phép trùng nhau**. Xem thêm
+> [SSH key và ưu tiên khách](KET_NOI_SSH_VA_UU_TIEN_KHACH_2026-11-05.md): job kho
+> tự tạm dừng để nhường job khách, giữ mail/tiến độ và tự tiếp tục sau đó.
+
 ## Mở giao diện quản lý VPS
 
 Nhấp **Mo_Giao_Dien_Quan_Ly_VPS.bat** để mở giao diện Windows. File

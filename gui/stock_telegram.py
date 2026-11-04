@@ -2,6 +2,10 @@
 import json
 
 
+def status_label(status):
+    return 'Tạm dừng ưu tiên khách' if status=='priority_wait' else status
+
+
 def stock_control(page, worker, request, actor):
     if actor.role!='admin':
         worker.reply(actor.chat_id,'Chỉ admin đang được cấp quyền mới được quản lý kho acc.',request.update_id)
@@ -17,7 +21,7 @@ def stock_control(page, worker, request, actor):
             from core.mail.providers.priority import GMAILVIP,ONE_TRIEU
             text=('API riêng mua mail tạo acc: GmailVip '+('đã nhập' if keys[GMAILVIP] else 'chưa nhập')+
                 ' · 1TrieuMail '+('đã nhập' if keys[ONE_TRIEU] else 'chưa nhập')+
-                '.\nChỉ dùng mua mail ban đầu để tạo acc. Mail nhập mã mời vẫn dùng /mailapi của bạn.')
+                '.\nCó thể dùng cùng key với /mailapi. Key ở đây áp dụng cho mua mail tạo acc; mail nhập mã mời dùng /mailapi của bạn.')
         elif action=='create':
             keys=store.get_creation_keys(actor.chat_id)
             if not any(keys.values()):raise ValueError('Dùng /acc_mailapi KEY_GMAILVIP KEY_1TRIEUMAIL trước khi tạo acc; dùng - cho shop không dùng.')
@@ -27,7 +31,7 @@ def stock_control(page, worker, request, actor):
         elif action=='list':
             rows=store.all();start=(data['page']-1)*10
             text=f"Kho acc · {len(rows)} acc · {store.summary()['beans']} bean · Trang {data['page']}\n"
-            text+='\n'.join(f"#{r['id']} · {r['email']} · {r['beans']} bean · {r['status']}" for r in rows[start:start+10])
+            text+='\n'.join(f"#{r['id']} · {r['email']} · {r['beans']} bean · {status_label(r['status'])}" for r in rows[start:start+10])
             text+='\n/acc_stop STT · /acc_resume STT · /acc_export STT1,STT2\n/acc_exports: lịch sử xuất'
         elif action in ('stop','resume'):
             text=getattr(controller,action)(data['ids'])['message']
@@ -36,7 +40,7 @@ def stock_control(page, worker, request, actor):
             if row is None:raise ValueError('Acc không còn trong kho.')
             target='Vô hạn, 10 lượt/ngày' if row['infinite'] else str(row['target'])+' bean'
             text=(f"Acc #{row['id']}\nEmail: {row['email']}\nMật khẩu: {row['password']}\n"
-                f"Bean: {row['beans']}\nMục tiêu: {target}\nMã mời: {row['invite_code']}\nTrạng thái: {row['status']}")
+                f"Bean: {row['beans']}\nMục tiêu: {target}\nMã mời: {row['invite_code']}\nTrạng thái: {status_label(row['status'])}")
         elif action=='batches':
             start=(data['page']-1)*10
             text='Tiến độ tạo acc · Trang '+str(data['page'])+'\n'

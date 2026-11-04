@@ -322,7 +322,7 @@ class StockControllerTests(unittest.TestCase):
         self.assertEqual(self.m.input_gmailvip_key.text(),'')
 
     def test_missing_creation_key_cannot_fall_back_to_general_api(self):
-        with self.assertRaisesRegex(ValueError,'riêng'):self.controller.create(1,2000,False,'123')
+        with self.assertRaisesRegex(ValueError,'Nhập API'):self.controller.create(1,2000,False,'123')
         self.assertEqual(self.store.batches(),[])
 
     def test_creation_purchase_snapshot_survives_restart_and_source_changes(self):
@@ -344,6 +344,10 @@ class StockControllerTests(unittest.TestCase):
             self.m._check_scheduled_jobs(now=datetime.now(VIETNAM_TIME)+timedelta(seconds=1))
         self.assertEqual(self.m._workers[jid].runner.mail_provider_api_key,'offline-key')
         self.assertNotIn('private-create',self.t.store.get_job(jid).schedule_data)
+
+    def test_same_api_can_be_used_for_creation_and_referral_purchases(self):
+        result=self.controller.create(1,2000,False,'123',mail_keys={'gmailvip_vn':'offline-key'})
+        self.assertEqual(self.store.batch_mail_settings(result['batch_id'])[1]['gmailvip_vn'],self.m.input_gmailvip_key.text())
 
     def test_bot_referral_mail_still_uses_owner_mailapi_not_creation_keys(self):
         self.t.store.upsert_user(123,'Admin','admin')

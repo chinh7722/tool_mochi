@@ -8,6 +8,8 @@
 !/main_mochi_server.py
 !/main_mochi_web.py
 !/main_vps_manager.py
+!/main_vps_connection.py
+!/Mo_Quan_Ly_Ket_Noi_VPS.bat
 !/Mo_Giao_Dien_Quan_Ly_VPS.bat
 !/cli_mochi.py
 !/Launch_*Tool.bat

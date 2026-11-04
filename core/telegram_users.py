@@ -795,6 +795,34 @@ class TelegramUserStore(CustomerAccountsMixin, JobStatisticsMixin):
                 recovered += 1
         return recovered
 
+    def pause_stock_job(self,jobid,when,success_count,attempted_count,failure_count,*,batch='',failure_streak=0):
+        """Checkpoint a background round without completing it or losing paid mail."""
+        when=schedule_time(when).isoformat()
+        values=[_count(v,'Tiến độ job') for v in (success_count,attempted_count,failure_count)]
+        with self._connection(write=True) as db:
+            row=db.execute('SELECT schedule_data FROM jobs WHERE job_id=? AND finalized_at IS NULL',(jobid,)).fetchone()
+            if row is None:return False
+            data=json.loads(row[0])
+            if not data.get('stock_account_id'):raise ValueError('Chỉ tạm dừng tự động job kho acc.')
+            data.update(priority_paused=True,resume_mail_batch=batch,priority_failure_streak=failure_streak)
+            _,payload=schedule_storage(when,data)
+            db.execute('''UPDATE jobs SET dispatch_state='scheduled',scheduled_at=?,schedule_data=?,
+                success_count=MAX(success_count,?),attempted_count=MAX(attempted_count,?),
+                failure_count=MAX(failure_count,?),updated_at=? WHERE job_id=?''',
+                (when,payload,*values,_now(),jobid))
+        return True
+
+    def save_stock_resume(self,jobid,batch,failure_streak):
+        with self._connection(write=True) as db:
+            row=db.execute('SELECT schedule_data FROM jobs WHERE job_id=? AND finalized_at IS NULL',(jobid,)).fetchone()
+            if row is None:return False
+            data=json.loads(row[0])
+            if not data.get('stock_account_id'):raise ValueError('Job không thuộc kho acc.')
+            data.update(priority_paused=False,resume_mail_batch=batch,priority_failure_streak=failure_streak)
+            _,payload=schedule_storage(data=data)
+            db.execute('UPDATE jobs SET schedule_data=? WHERE job_id=?',(payload,jobid))
+        return True
+
     def defer_queued_schedule(self, jobid):
         jobid = _text(jobid, 'Mã job', 120)
         with self._connection(write=True) as connection:

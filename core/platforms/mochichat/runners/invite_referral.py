@@ -18,7 +18,7 @@ from core.job_events import JobLogEvent, JobLogLevel, JobProgressEvent
 from core.mail.providers.gmailvip_vn import GmailVipVn, parse_gmailvip_product_ids
 from core.mail.providers.one_trieu_mail import OneTrieuMail, parse_1trieumail_product_ids
 from core.mail.providers.priority import MULTI_SHOP, GMAILVIP, ONE_TRIEU, buy_priority_batch
-from core.mail.batch_inventory import save_reserved_batch, write_batch, load_batch, update_batch, reserve_batch
+from core.mail.batch_inventory import save_reserved_batch, write_batch, load_batch, update_batch, reserve_batch,resume_batch_policy
 from core.platforms.mochichat.device import DeviceInfo
 from core.platforms.mochichat.fetcher import MochiChatFetcher, MochiRedeemResult
 from core.platforms.mochichat.invite_quota_lock import invite_code_guard
@@ -98,6 +98,9 @@ class MochiInviteRunner:
         probe_invite_first: bool = True,
         invite_quota_store=None,
         failure_budget_used=0,
+        pause_event=None,
+        resume_mail_batch=None,
+        failure_streak=0,
     ):
         self.cloud_client = cloud_client
         if type(failure_budget_used) is not int or failure_budget_used < 0:
@@ -109,6 +112,11 @@ class MochiInviteRunner:
         self.log_sink = log_sink
         self.progress_sink = progress_sink
         self.cancel_event = cancel_event
+        self.pause_event=pause_event
+        self.resume_mail_batch=resume_mail_batch
+        self.failure_streak=failure_streak
+        self.short_delivery=False
+        self.resume_failure_credit=0
 
         self.mail_provider = str(mail_provider).strip().lower()
         self.mail_provider_api_key = str(mail_provider_api_key).strip()
@@ -221,6 +229,26 @@ class MochiInviteRunner:
             return bool(self.cancel_event)
         return False
 
+    def _is_paused(self):
+        return self.pause_event is not None and self.pause_event.is_set()
+
+    async def _lease_account_proxy(self,task_ident):
+        pending=asyncio.create_task(self.proxy_client.lease(task_ident,platform_id='mochichat',purpose=ProxyLeasePurpose.ACCOUNT))
+        delivered=False
+        try:
+            while not pending.done() and not self._is_paused():
+                await asyncio.wait({pending},timeout=.1)
+            if self._is_paused():return None
+            lease=pending.result();delivered=True
+            return lease
+        finally:
+            if not pending.done():
+                pending.cancel();await asyncio.gather(pending,return_exceptions=True)
+            if not delivered and not pending.cancelled():
+                try:lease=pending.result()
+                except Exception:pass
+                else:await self.proxy_client.release(lease,platform_id='mochichat',outcome=ProxyReleaseOutcome.ABORTED,success=False)
+
     def _quota_snapshot(self,code):
         if self.invite_quota_store is None:
             return None
@@ -257,7 +285,7 @@ class MochiInviteRunner:
             return await self._run_owned(**arguments)
         started=False
         try:
-            async with invite_code_guard(self.invite_quota_store,invite_code,cancelled=self._is_cancelled,
+            async with invite_code_guard(self.invite_quota_store,invite_code,cancelled=lambda:self._is_cancelled() or self._is_paused(),
                     on_wait=lambda:self._emit_log(job_id,'Mã mời đang được job khác xử lý; chờ đối chiếu lượt trước khi mua mail.')):
                 started=True
                 return await self._run_owned(**arguments)
@@ -265,7 +293,7 @@ class MochiInviteRunner:
             if started:
                 raise
             return MochiInviteJobSummary(job_id,str(invite_code).strip().upper(),target_count,0,
-                max(0,min(initial_success_count,target_count)),0,0,'cancelled',(),
+                max(0,min(initial_success_count,target_count)),0,0,'paused' if self._is_paused() and not self._is_cancelled() else 'cancelled',(),
                 'Đã hủy trong khi chờ job cùng mã mời.')
         except Exception as exc:
             self._emit_log(job_id,'Không đối chiếu được bộ đếm mã mời; dừng trước khi mua thêm mail.',level=JobLogLevel.ERROR)
@@ -320,8 +348,14 @@ class MochiInviteRunner:
 
         latest_success_ref = [base_success_count]
         source_batch_lock = None
+        resume_batch_lock = None
 
         try:
+            if self.resume_mail_batch and source_mail_batch is None:
+                resume_batch_lock=reserve_batch(self.resume_mail_batch)
+                accounts=load_batch(self.resume_mail_batch,pending_only=True)
+                self.short_delivery,self.resume_failure_credit=resume_batch_policy(self.resume_mail_batch)
+                self._emit_log(job_id,f'Tiếp tục với {len(accounts)} mail đã mua chưa dùng; chỉ mua thêm phần còn thiếu.')
             if self.failure_budget_used >= 5 and base_success_count < target_count:
                 return MochiInviteJobSummary(job_id,clean_code,target_count,0,base_success_count,0,0,
                     'failed',(),'Đạt giới hạn tổng 5 lỗi trong job.')
@@ -356,9 +390,14 @@ class MochiInviteRunner:
                     if source_mail_batch is not None:
                         update_batch(self.mail_batch_path, job_id, summary.results)
                     else:
-                        write_batch(self.mail_batch_path, job_id, self.purchased_accounts, summary.results)
+                        write_batch(self.mail_batch_path, job_id, self.purchased_accounts, summary.results,short_delivery=self.short_delivery)
                 except (OSError, ValueError, TypeError) as exc:
                     self._emit_log(job_id, f'Không cập nhật được trạng thái lô mail: {exc}', level=JobLogLevel.WARNING)
+                    if summary.status=='paused':
+                        raise RuntimeError('Không lưu được trạng thái lô mail khi tạm dừng; cần kiểm tra trước khi tiếp tục.') from None
+            if self.resume_mail_batch:
+                # Update the old paid batch separately from any fresh purchase made this round.
+                update_batch(self.resume_mail_batch,job_id,summary.results)
             return summary
         except asyncio.CancelledError:
             self._emit_log(job_id, "Người dùng đã hủy nhiệm vụ.", level=JobLogLevel.WARNING)
@@ -389,6 +428,7 @@ class MochiInviteRunner:
                 error_message=str(exc),
             )
         finally:
+            if resume_batch_lock is not None:resume_batch_lock.release()
             if source_batch_lock is not None:
                 source_batch_lock.release()
             if self._purchased_batch_lock is not None:
@@ -412,18 +452,19 @@ class MochiInviteRunner:
         error_msg = None
         active_tasks = set()
         success_count = initial_success_count
-        failure_count = already_redeemed_count = attempted_count = consecutive_failures = 0
+        failure_count = already_redeemed_count = attempted_count = 0
+        consecutive_failures = self.failure_streak
         terminal_status = None
         quota_tracking_failed=False
         cancelled = False
         provided = list(accounts) if accounts is not None else None
         account_idx = 0
         probe_mode=provided is None and self.probe_invite_first
-        probe_passed=False
-        purchase_round=0
+        probe_passed=bool(self.resume_mail_batch and initial_success_count>0)
+        purchase_round=1 if probe_passed else 0
         remaining_spares=[]
-        may_replenish = accounts is None
-        covered_failures = 0
+        may_replenish = accounts is None or bool(self.resume_mail_batch)
+        covered_failures = -self.resume_failure_credit if self.short_delivery else 0
         replacement_amount = None
 
         def progress():
@@ -478,13 +519,14 @@ class MochiInviteRunner:
             received = tuple(MochiAccountItem(identifier=info.username,
                 email=info.username, password=info.password, device=DeviceInfo()) for info in purchased)
             self.purchased_accounts += received
+            self.short_delivery=self.short_delivery or len(purchased)<amount
             covered_failures = failure_count + already_redeemed_count
             # Save the entire paid batch, including any extra delivery, before processing.
             if self.mail_batch_path is None:
                 self.mail_batch_path, self._purchased_batch_lock = save_reserved_batch(
-                    job_id, self.purchased_accounts, self.mail_batch_dir)
+                    job_id, self.purchased_accounts, self.mail_batch_dir,short_delivery=self.short_delivery)
             else:
-                write_batch(self.mail_batch_path,job_id,self.purchased_accounts,results)
+                write_batch(self.mail_batch_path,job_id,self.purchased_accounts,results,short_delivery=self.short_delivery)
             provided = (list(remaining_spares)+list(received[:amount])
                 if probe_mode and purchase_round>0 else list(received[:amount]))
             account_idx = 1
@@ -498,7 +540,7 @@ class MochiInviteRunner:
             nonlocal consecutive_failures, terminal_status, error_msg, account_idx, provided
             nonlocal probe_passed
             nonlocal quota_tracking_failed
-            if self._is_cancelled() or terminal_status:
+            if self._is_cancelled() or self._is_paused() or terminal_status:
                 return
             item = None
             if provided is not None:
@@ -521,12 +563,13 @@ class MochiInviteRunner:
                 if self.proxy_client and needs_proxy:
                     # Account proxies protect Google/Mochi; mail has its own route.
                     try:
-                        lease = await self.proxy_client.lease(task_ident, platform_id='mochichat', purpose=ProxyLeasePurpose.ACCOUNT)
+                        lease = await self._lease_account_proxy(task_ident)
+                        if lease is None:return
                     except Exception as exc:
                         terminal_status = 'failed'
                         error_msg = f'Không cấp được proxy: {exc}'
                         raise RuntimeError(error_msg) from exc
-                if self._is_cancelled() or terminal_status:
+                if self._is_cancelled() or self._is_paused() or terminal_status:
                     return
                 assigned_proxy = lease.proxy if lease else None
 
@@ -609,7 +652,7 @@ class MochiInviteRunner:
                         return assigned_proxy
 
                     item=await buy_accounts(assigned_proxy,rotate_mail_proxy)
-                if self._is_cancelled() or terminal_status:
+                if self._is_cancelled() or self._is_paused() or terminal_status:
                     return
                 attempted_count += 1
                 account_started = True
@@ -692,6 +735,11 @@ class MochiInviteRunner:
         progress()
         try:
             while success_count < target_count and not self._is_cancelled() and not terminal_status:
+                if self._is_paused():
+                    if not active_tasks:break
+                    done,active_tasks=await asyncio.wait(active_tasks,timeout=.2,return_when=asyncio.FIRST_COMPLETED)
+                    for task in done:task.result()
+                    continue
                 quota=self._quota_snapshot(clean_code)
                 if quota is not None and quota.limit_reached and not active_tasks:
                     terminal_status='invite_limit_reached'
@@ -729,6 +777,10 @@ class MochiInviteRunner:
                         remaining_spares = []
                         self._emit_log(job_id, f'Mua bù {replacement_amount} mail cho lượt lỗi; '
                             f'đã lỗi {self.failure_budget_used+failure_count+already_redeemed_count}/5, liên tiếp {consecutive_failures}/3.')
+                    elif not spare and self.resume_mail_batch and not self.short_delivery:
+                        provided=None;account_idx=0;remaining_spares=[]
+                        probe_mode=self.probe_invite_first and success_count==0
+                        purchase_round=0 if probe_mode else 1
                 # Outstanding tasks already reserve part of the remaining target.
                 available = min(self.current_concurrency() - len(active_tasks),
                     target_count - success_count - len(active_tasks))
@@ -766,9 +818,12 @@ class MochiInviteRunner:
             final_status = 'completed'
         elif cancelled or self._is_cancelled():
             final_status = 'cancelled'
+        elif self._is_paused() and not terminal_status:
+            final_status = 'paused'
         else:
             final_status = terminal_status or 'failed'
         total_failures = failure_count + already_redeemed_count
+        self.failure_streak=consecutive_failures
         self._emit_log(job_id, f'Kết thúc job: {final_status}, thành công {success_count}/{target_count}, lỗi {total_failures}.')
         self._emit_progress(job_id, target_count, attempted_count, success_count, total_failures,
             final_status, error_message=error_msg)

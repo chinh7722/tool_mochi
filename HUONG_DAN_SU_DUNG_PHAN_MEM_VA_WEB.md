@@ -1,5 +1,10 @@
 # Hướng dẫn sử dụng Hoshino Tool — Phần mềm và web local
 
+> **[Quản lý kết nối SSH và ưu tiên khách](KET_NOI_SSH_VA_UU_TIEN_KHACH_2026-11-05.md):**
+> file mới **Mo_Quan_Ly_Ket_Noi_VPS.bat** lưu hồ sơ/SSH key và mở tunnel bằng
+> giao diện. Job tích bean kho tự nhường job khách và chạy tiếp khi hết job khách.
+> API tạo acc được phép trùng API nhập mã mời.
+
 > **05/11/2026:** [Tạo acc tích bean và quản lý kho](KHO_ACC_TICH_BEAN_2026-11-05.md).
 > Kho hiện lưu acc Mochi đã tạo, thay cho danh sách lô mail. Có mục tiêu/vô hạn,
 > dừng/tiếp tục, xóa có xác nhận và xuất với lịch sử riêng. Mở giao diện Windows

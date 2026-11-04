@@ -96,6 +96,8 @@ class TelegramPage(QWidget):
         mochi_page.scheduled_job_cancel = self.store.cancel_scheduled_job
         mochi_page.scheduled_job_defer = self.store.defer_queued_schedule
         mochi_page.combo_job_reschedule = self.store.reschedule_combo_job
+        mochi_page.priority_job_reschedule = self.store.pause_stock_job
+        mochi_page.stock_resume_save = self.store.save_stock_resume
         mochi_page.job_run_recorder = self.store.record_job_run
         mochi_page.job_mail_keys_resolver = self._job_mail_keys
         self.store.migrate_legacy(self.config.chat_ids)

@@ -1,5 +1,10 @@
 # hoshino-tool — Mochi Chat, Proxy Pool & Telegram
 
+> **[SSH key và ưu tiên job khách](KET_NOI_SSH_VA_UU_TIEN_KHACH_2026-11-05.md):**
+> mở **Mo_Quan_Ly_Ket_Noi_VPS.bat** để quản lý kết nối, lưu SSH key và mở tunnel.
+> Job nạp bean cho khách ưu tiên trước kho acc; kho tự tạm dừng và tiếp tục cùng
+> tiến độ/mail đã mua. API tạo acc và API nhập mã mời có thể dùng cùng key.
+
 > **[Kho acc tích bean](KHO_ACC_TICH_BEAN_2026-11-05.md):** tạo acc theo lô mail,
 > lấy mã mời và tích bean theo combo; có chế độ vô hạn 10 lượt/ngày. Kho lưu acc
 > đã tạo, chọn/dừng/xóa/xuất `mail|mật khẩu` và lịch sử xuất. Có lệnh bot cho admin.

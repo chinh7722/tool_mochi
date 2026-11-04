@@ -35,32 +35,33 @@ def save_batch(job_id, accounts, directory=None):
     return path
 
 
-def save_reserved_batch(job_id, accounts, directory=None):
+def save_reserved_batch(job_id, accounts, directory=None, *, short_delivery=False):
     """Reserve a fresh purchase before its JSON becomes visible to other jobs."""
     path = _new_batch_path(job_id, directory)
     lock = reserve_batch(path)
     try:
-        write_batch(path, job_id, accounts)
+        write_batch(path, job_id, accounts,short_delivery=short_delivery)
     except BaseException:
         lock.release()
         raise
     return path, lock
 
 
-def write_batch(path, job_id, accounts, results=()):
+def write_batch(path, job_id, accounts, results=(), *, short_delivery=False):
     statuses = {item.account_identifier: item.status for item in results}
     data = {'job_id': job_id, 'accounts': [
         {'email': item.email, 'password': item.password,
          'status': statuses.get(item.identifier, 'pending')}
         for item in accounts
     ]}
+    if short_delivery:data['short_delivery']=True
     path = Path(path)
     temporary = path.with_suffix('.tmp')
     temporary.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding='utf-8')
     temporary.replace(path)
 
 
-def load_batch(path):
+def load_batch(path, *, pending_only=False):
     """Load unfinished mail without ever switching to another shop purchase."""
     from core.platforms.mochichat.runners.invite_referral import MochiAccountItem
     data = json.loads(Path(path).read_text(encoding='utf-8-sig'))
@@ -78,11 +79,19 @@ def load_batch(path):
         if email.lower() in seen:
             raise ValueError('File lô mail có tài khoản trùng; kiểm tra lại trước khi chạy.')
         seen.add(email.lower())
-        if row.get('status', 'pending') not in ('success', 'already_redeemed'):
+        status=row.get('status','pending')
+        if (status=='pending' if pending_only else status not in ('success', 'already_redeemed')):
             accounts.append(MochiAccountItem(email, email, password))
-    if not accounts:
+    if not accounts and not pending_only:
         raise ValueError('Lô mail không còn tài khoản chưa hoàn tất.')
     return tuple(accounts)
+
+
+def resume_batch_policy(path):
+    data=json.loads(Path(path).read_text(encoding='utf-8-sig'))
+    shortage=data.get('short_delivery') is True
+    failed=sum(row.get('status','pending') not in ('pending','success') for row in data['accounts'])
+    return shortage,failed
 
 
 def update_batch(path, job_id, results):

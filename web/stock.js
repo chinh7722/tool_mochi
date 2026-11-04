@@ -1,4 +1,4 @@
-const labels={waiting:'Chờ tích bean',accumulating:'Đang tích bean',ready:'Đủ bean',stopping:'Đang dừng',paused:'Đã dừng',failed:'Lỗi tích bean',exporting:'Đang xuất',queued:'Chờ mua mail',buying:'Đang mua mail',creating:'Đang tạo acc',uncertain:'Cần đối soát',partial:'Có acc lỗi',completed:'Hoàn tất',pending:'Chưa đóng phiếu'};
+const labels={waiting:'Chờ tích bean',priority_wait:'Tạm dừng ưu tiên khách',accumulating:'Đang tích bean',ready:'Đủ bean',stopping:'Đang dừng',paused:'Đã dừng',failed:'Lỗi tích bean',exporting:'Đang xuất',queued:'Chờ mua mail',buying:'Đang mua mail',creating:'Đang tạo acc',uncertain:'Cần đối soát',partial:'Có acc lỗi',completed:'Hoàn tất',pending:'Chưa đóng phiếu'};
 
 export function installStock({$,app,api,command,esc,n,time,table,toast,controls}) {
   let offset=0,exportOffset=0,total=0,busy=false,rows=[],selected=new Set(),exportRecord=null,signature='',pendingFinish='';

@@ -7,6 +7,7 @@ from PySide6.QtWidgets import (QWidget,QVBoxLayout,QHBoxLayout,QFormLayout,QLabe
     QPlainTextEdit,QApplication,QMessageBox,QAbstractItemView)
 
 STATUS = {'waiting':'Chờ tích bean','accumulating':'Đang tích bean','ready':'Đủ bean',
+    'priority_wait':'Tạm dừng ưu tiên khách',
     'stopping':'Đang dừng','paused':'Đã dừng','failed':'Lỗi tích bean','exporting':'Đang xuất',
     'queued':'Chờ mua mail','buying':'Đang mua mail','creating':'Đang tạo acc',
     'uncertain':'Cần đối soát','partial':'Có acc lỗi','completed':'Hoàn tất','pending':'Chưa đóng phiếu'}
@@ -31,7 +32,7 @@ class StockCreateForm(QWidget):
         layout.addRow('API GmailVip tạo acc',self.gmailvip_key);layout.addRow('API 1TrieuMail tạo acc',self.one_trieu_key)
         layout.addRow(self.infinite)
         note = QLabel('Mua một lô bằng số acc yêu cầu, tạo/đăng nhập từng acc và lấy mã mời. '
-            'Giữ tiến độ trên VPS; đạt giới hạn thì chờ 24 giờ 1 phút. Bean mục tiêu là tổng bean trong acc.')
+            'API tạo acc có thể trùng API nhập mã mời. Giữ tiến độ trên VPS; đạt giới hạn thì chờ 24 giờ 1 phút. Bean mục tiêu là tổng bean trong acc.')
         note.setWordWrap(True);layout.addRow(note)
         self.message = QLabel();self.message.setWordWrap(True);layout.addRow(self.message)
 

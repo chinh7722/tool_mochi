@@ -1,5 +1,49 @@
 # Biên Bản Giao Ca & Nhật Ký Phát Triển Dự Án (Giao_ca.md)
 
+## 05/11/2026 — SSH key, API được trùng và ưu tiên job khách
+
+- API mua mail tạo acc được phép trùng giá trị API nhập mã mời. Tách vị trí
+  cấu hình theo công đoạn, không áp điều kiện key phải khác nhau. Có test dùng
+  cùng key và cập nhật ghi chú trên tool/web/bot.
+- Thêm `main_vps_connection.py`, `Mo_Quan_Ly_Ket_Noi_VPS.bat`,
+  `core/ssh_connections.py`, `gui/ssh_manager.py`: hồ sơ host/port/user/key,
+  lưu/chọn/import/tạo ed25519, xem public key, xác nhận fingerprint, kết nối/ngắt
+  tunnel bằng QProcess/OpenSSH. Bind localhost, StrictHostKeyChecking=yes,
+  BatchMode=yes, ExitOnForwardFailure=yes. Đường dẫn known_hosts có dấu cách
+  phải được quote cho cả SSH config parser, không chỉ quote argv ở Python.
+- Đã cấu hình hồ sơ Mochi VPS sv50 cho host/cổng/user hiện tại. Private key tại
+  data/ssh_keys/mochi_sv50_root1_ed25519, ACL chỉ user Windows sở hữu; public key
+  cài idempotent vào root1 ~/.ssh/authorized_keys, giữ key cũ. Không đưa private
+  key/data vào Git. Đã test đăng nhập key không mật khẩu và tunnel thật bằng
+  GUI trên cổng tạm; API trả401 khi thiếu token. Không chiếm tunnel cũ của user.
+- `gui/job_priority.py`: phân loại kho bằng stock_account_id. _drain_job_queue
+  xếp job khách trước, yêu cầu stock worker tạm dừng, chờ stock cleanup xong mới
+  chạy khách; _check_scheduled_jobs xử lý lịch khách/combo đến hạn trước kho.
+  Lịch khách tương lai không chặn stock. Tất cả nguồn local/web/bot chung luồng.
+- Worker/runner có pause_event riêng với cancel_event. Pause không hủy mù POST
+  mua mail/nhập mã đang gửi: chờ kết quả, không khởi lượt mới. Chờ cấp proxy có
+  thể nhường ngay; lookup tạo acc nền có thể cancel an toàn. _Stock.tick không
+  khởi chuẩn bị/dispatch khi còn khách. Lookup bị cancel trước factory phải đưa
+  logging_in về creating, nếu không sẽ mắc kẹt trong phiên hiện tại.
+- Store.pause_stock_job lưu same job ID, progress, resume_mail_batch, chuỗi lỗi,
+  dispatch scheduled ngay. Không emit job_finished/record_job_run cho paused:
+  không finalize/thất bại/nhân lượt khách. Hết khách tự resume, không thêm24h;
+  quota24h thật vẫn được giữ. Dừng thủ công thắng pause tự động, không tự bật lại.
+- Runner đọc pending mail của lô cũ, bỏ thành công/lỗi đã xử lý, dùng trước mua
+  mới. Lô cũ update riêng với lô mua mới, nhiều lần pause không ghi đè lịch sử.
+  Giữ short_delivery và credit lỗi qua pause: không biến thiếu hàng shop thành
+  quyền mua bù. Nếu ghi trạng thái mail lúc pause lỗi, fail closed để đối soát,
+  không tự resume có thể nhập trùng. Giữ tổng5 lỗi và streak3 qua tạm dừng.
+- Cập nhật STATUS trên tool/web, hướng dẫn
+  KET_NOI_SSH_VA_UU_TIEN_KHACH_2026-11-05.md. Root/src phải đồng bộ.
+- QA: full1110 PASS trên Windows/Ubuntu; bản chốt324 ca liên quan PASS trên
+  cả hai (priority23, stock39, lô41, bù13, logic37, probe27, TLS25, queue16,
+  combo16, lịch30, SSH11, sync12, desktop6, bot28). Tổng1114 ca riêng biệt đã
+  qua, không mua mail/nhập mã/gửi bot thật để QA. GUI SSH đã smoke thật bằng
+  key trên cổng tạm, xác minh401, rồi đóng đúng tunnel test. Source438 file,
+  không data/.tmp/private key. Ảnh .tmp/ssh_connection_manager.png.
+
+
 > **03/11/2026 — bộ đếm lượt nhập thành công theo mã:** đủ10 lượt trong24h trượt
 > trả giới hạn ngay trước mua mail. Tính cả lượt trong job lỗi/hủy, dùng chung
 > mọi người tạo job. Chi tiết [hướng dẫn](GIOI_HAN_MA_MOI_24H_2026-11-03.md).
