@@ -42,6 +42,9 @@
   qua, không mua mail/nhập mã/gửi bot thật để QA. GUI SSH đã smoke thật bằng
   key trên cổng tạm, xác minh401, rồi đóng đúng tunnel test. Source438 file,
   không data/.tmp/private key. Ảnh .tmp/ssh_connection_manager.png.
+- Bổ sung guard không chuyển job kho đã hoàn thành sang trạng thái pause khi
+  thread chỉ còn cleanup; testcase riêng PASS trên Windows. Priority hiện24 ca,
+  tổng1115 ca riêng biệt sau bổ sung, không cần chạy lại các nhóm không đổi.
 
 
 > **03/11/2026 — bộ đếm lượt nhập thành công theo mã:** đủ10 lượt trong24h trượt

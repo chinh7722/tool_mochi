@@ -19,7 +19,7 @@ def customer_pending(page,now=None):
 def request_stock_pause(page):
     for jid in list(page._active_job_ids):
         record=page._session_jobs.get(jid);worker=page._workers.get(jid)
-        if not is_stock(record) or worker is None or record.combo_cancel_requested:continue
+        if not is_stock(record) or worker is None or record.is_terminal or record.combo_cancel_requested:continue
         if not worker._pause_event.is_set():
             worker.request_pause()
             record.status='Đang tạm dừng để ưu tiên khách'

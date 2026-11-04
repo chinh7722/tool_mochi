@@ -272,5 +272,12 @@ class CustomerPriorityTests(unittest.TestCase):
         finally:
             page.shutdown_workers();other.shutdown_workers();page.deleteLater();other.deleteLater();self.app.processEvents()
 
+    def test_completed_stock_waiting_for_thread_cleanup_keeps_completed_status(self):
+        row,jid=self.stock()
+        self.m._on_job_finished(MochiInviteJobSummary(jid,'STOCKCODE',15,15,15,0,0,'completed',()))
+        self.m._on_start_clicked(code='CUSTOMER',points=100)
+        self.assertEqual(self.m._session_jobs[jid].status,'Hoàn thành')
+        self.assertFalse(self.m._workers[jid]._pause_event.is_set())
+
 
 if __name__=='__main__':unittest.main()
