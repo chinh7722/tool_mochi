@@ -233,6 +233,8 @@ class RemoteMainWindow(QMainWindow):
         return build_mochi(self)
 
     def create_job(self):
+        if getattr(self,'_stock_mode',False):
+            return self.stock_create_panel.create()
         self.save_job_draft(quiet=True)
         payload = dict(code=self.job_code.text().strip(),points=self.job_points.value(),
             customer=self.job_customer.text(),batch=self.job_batch.currentData() or '')
@@ -241,6 +243,17 @@ class RemoteMainWindow(QMainWindow):
         if self.schedule.isChecked():
             payload['scheduled_at'] = self.schedule_time.dateTime().toString('yyyy-MM-ddTHH:mm:ss')+'+07:00'
         self.send('job.create',payload,self.job_created)
+
+    def select_stock_mode(self,enabled):
+        self._stock_mode=enabled
+        self.stock_create_panel.setVisible(enabled)
+        self.invite_form.setVisible(not enabled)
+        for index,button in enumerate(self.stock_type_buttons):button.setChecked(enabled==(index==1))
+        for index,frame in enumerate(self.stock_type_frames):
+            selected=enabled==(index==1)
+            frame.setStyleSheet('QFrame#remoteCard {background:'+('#202c43;border:1px solid #3b82f6;' if selected else '#202023;border:1px solid #383840;')+'}')
+        for widget in self.stock_invite_notes:widget.setVisible(not enabled)
+        self.job_start_button.setText('Bắt đầu tạo acc tích bean' if enabled else 'Bắt đầu nhập mã')
 
     def job_created(self,result):
         job_id=result.get('job_id')

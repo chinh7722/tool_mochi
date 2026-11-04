@@ -122,7 +122,8 @@ def _job(owner, row):
     refunded = None if not has_order or row['charged_units'] is None else row['reserved_units'] - row['charged_units']
     return {**_owner_columns(owner),
         'job_id':row['job_id'], 'customer_order_id':row['customer_order_id'] or '', 'code':row['code'],
-        'customer_name':customer, 'combo':'Có' if combo else 'Không', 'requested_beans':row['requested_beans'],
+        'customer_name':customer, 'combo':'Có' if combo else 'Không',
+        'requested_beans':0 if row['job_id'].startswith('stock_') else row['requested_beans'],
         'target_count':row['target_count'], 'attempted_count':row['attempted_count'],
         'success_count':success, 'failure_count':row['failure_count'], 'achieved_beans':success*100,
         'status':status, 'dispatch_state':{'running':'Đang xử lý', 'queued':'Đang chờ',

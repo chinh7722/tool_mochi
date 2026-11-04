@@ -103,6 +103,7 @@ class TelegramControlRequest:
     gmailvip_api_key: str = field(default='', repr=False)
     one_trieu_api_key: str = field(default='', repr=False)
     page: int = 1
+    stock_data: dict = field(default_factory=dict, repr=False)
 
 
 @dataclass(frozen=True)
@@ -123,6 +124,39 @@ def parse_control_command(text, chat_id, role, update_id):
     """Parse private commands; current ledger permissions are checked on dispatch."""
     parts = text.strip().split(maxsplit=3)
     command = parts[0].lower().split('@', 1)[0]
+    if command.startswith('/acc'):
+        if role!='admin':
+            raise ValueError('Chỉ admin đang được cấp quyền mới được quản lý kho acc.')
+        values=text.strip().split()
+        aliases={'/acc_create':'create','/accs':'list','/acc_info':'info','/acc_batches':'batches','/acc_stop':'stop','/acc_resume':'resume',
+            '/acc_delete':'delete','/acc_export':'export','/acc_exports':'exports',
+            '/acc_show':'show','/acc_done':'done','/acc_retry':'retry'}
+        action=aliases.get(command)
+        payload={}
+        if action=='create':
+            if len(values)!=4 or not values[1].isdigit() or (values[2].lower()!='infinite' and not values[2].isdigit()):
+                raise ValueError('Cú pháp: /acc_create SỐ_ACC BEAN_MỖI_ACC PRODUCT_ID. Dùng infinite thay số bean để tích vô hạn.')
+            from core.stock_accounts import creation_options
+            count,beans,infinite,product=creation_options(int(values[1]),1000 if values[2].lower()=='infinite' else int(values[2]),values[2].lower()=='infinite',values[3])
+            payload=dict(count=count,beans=beans,infinite=infinite,product_ids=product)
+        elif action in ('list','exports','batches'):
+            if len(values)>2 or (len(values)==2 and not re.fullmatch('[1-9][0-9]{0,5}',values[1])):
+                raise ValueError('Cú pháp: '+command+' [TRANG].')
+            payload={'page':int(values[1]) if len(values)==2 else 1}
+        elif action in ('stop','resume','delete','export','info'):
+            raw=''.join(values[1:])
+            if not re.fullmatch('[0-9]+(?:,[0-9]+)*',raw):
+                raise ValueError('Cú pháp: '+command+' STT1,STT2,...')
+            from core.stock_accounts import selected_ids
+            payload={'ids':selected_ids([int(v) for v in raw.split(',')])}
+            if action=='info' and len(payload['ids'])!=1:raise ValueError('Cú pháp: /acc_info STT.')
+        elif action in ('show','done','retry'):
+            if len(values)!=2 or not re.fullmatch('[A-Za-z0-9_-]{1,80}',values[1]):
+                raise ValueError('Cú pháp: '+command+' MÃ_PHIẾU_HOẶC_LÔ.')
+            payload={'id':values[1]}
+        else:
+            raise ValueError('Kho acc: /acc_create, /accs, /acc_stop, /acc_resume, /acc_delete, /acc_export, /acc_exports, /acc_show, /acc_done, /acc_retry.')
+        return TelegramControlRequest(update_id,chat_id,'stock_'+action,stock_data=payload)
     if command in ('/baocao','/report'):
         if role not in ('admin','partner'):
             raise ValueError('Chỉ admin/partner đang được cấp quyền mới được xuất báo cáo.')
@@ -285,7 +319,13 @@ class TelegramBotService:
         '/partner_remove CHAT_ID: xóa quyền partner, giữ lịch sử.\n'
         '/partners [TRANG]: danh sách partner.\n'
         '/partner CHAT_ID: thông tin và thống kê của partner.\n'
-        '/baocao CHAT_ID: xuất CSV mua mail và job của partner/admin khác.')
+        '/baocao CHAT_ID: xuất CSV mua mail và job của partner/admin khác.\n'
+        'Kho acc (admin): /acc_create SỐ_ACC BEAN PRODUCT_ID (BEAN=infinite để tích vô hạn).\n'
+        '/accs [TRANG]: số acc, bean và danh sách. /acc_stop STT1,STT2: dừng; /acc_resume STT: tiếp tục.\n'
+        '/acc_info STT: email, mật khẩu và thông tin acc. /acc_batches [TRANG]: tiến độ tạo acc.\n'
+        '/acc_delete STT: xóa acc đã dừng. /acc_export STT1,STT2: xuất file mail|mật khẩu.\n'
+        '/acc_exports [TRANG]: lịch sử xuất; /acc_show PHIẾU: tải lại; /acc_done PHIẾU: hoàn tất xuất.\n'
+        '/acc_retry MÃ_LÔ: thử tạo lại từ mail đã mua, không mua thêm.')
     HELP = ('Lệnh tạo job: /job MÃ_MỜI SỐ_KẸO [TÊN_KHÁCH]\n'
         '/mailapi KEY_GMAILVIP KEY_1TRIEUMAIL: lưu đủ 2 API mua mail riêng. /mailapi: xem trạng thái đã nhập.\n'
         'Ví dụ: /job VBRN5H 1000 Khách A\n'
@@ -343,14 +383,16 @@ class TelegramBotService:
                 filename=item.get('filename')
                 text=item.get('text')
                 count=item.get('row_count')
-                if (not isinstance(filename,str) or not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9_.-]{0,175}\.csv',filename)
+                extension='txt' if item.get('kind')=='stock_accounts' and admin_only else 'csv'
+                if (not isinstance(filename,str) or not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9_.-]{0,175}\.'+extension,filename)
                         or not isinstance(text,str) or type(count) is not int or count<0):
                     return False
                 data=text.encode('utf-8')
                 total+=len(data)
                 if not data or total>MAX_REPORT_BYTES:
                     return False
-                title='Lịch sử job' if item.get('kind')=='jobs' else 'Lịch sử mua mail'
+                title=('Kho acc đã xuất' if item.get('kind')=='stock_accounts' else
+                    'Lịch sử job' if item.get('kind')=='jobs' else 'Lịch sử mua mail')
                 documents.append((filename,data,f'{title} · Chat ID {target_id} · {count} dòng'))
             self.report_outbox.put_nowait((chat_id,target_id,tuple(documents),authorize,bool(admin_only)))
             return True
@@ -429,7 +471,8 @@ class TelegramBotService:
         if base in ('/start', '/help'):
             self.reply(chat_id, self.HELP+(self.ADMIN_HELP if self.access.role(chat_id)=='admin' else ''))
         elif base in ('/stats', '/users', '/user_add', '/user_revoke','/lich','/schedules','/huy','/cancel','/mailapi',
-                '/partner_add','/partner_remove','/partner_delete','/partners','/partner','/partner_info','/baocao','/report'):
+                '/partner_add','/partner_remove','/partner_delete','/partners','/partner','/partner_info','/baocao','/report',
+                '/acc_create','/accs','/acc_info','/acc_batches','/acc_stop','/acc_resume','/acc_delete','/acc_export','/acc_exports','/acc_show','/acc_done','/acc_retry'):
             try:
                 request = parse_control_command(text, chat_id, self.access.role(chat_id), update_id)
             except ValueError as exc:

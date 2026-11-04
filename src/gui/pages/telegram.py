@@ -143,6 +143,10 @@ class TelegramPage(QWidget):
             self.lbl_status.setText('Chưa khôi phục đủ lịch job. Kiểm tra dữ liệu; lịch đã lưu vẫn được giữ.')
         if self.config.auto_start:
             QTimer.singleShot(0, self._start_bot)
+        from gui.stock_controller import StockController
+        mochi_page.stock_controller = StockController(mochi_page,self,self.store.path.parent)
+        from gui.stock_widgets import install_local_stock
+        install_local_stock(mochi_page)
 
     def _build_ui(self):
         layout = QVBoxLayout(self)
@@ -1350,6 +1354,10 @@ class TelegramPage(QWidget):
             return
         if request.action in ('partner_add','partner_remove','partner_list','partner_info'):
             self._on_partner_control(worker,request,actor)
+            return
+        if request.action.startswith('stock_'):
+            from gui.stock_telegram import stock_control
+            stock_control(self,worker,request,actor)
             return
         if request.action=='user_report':
             target=request.target_chat_id if request.target_chat_id is not None else actor.chat_id

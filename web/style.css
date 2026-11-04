@@ -11,3 +11,5 @@
 /* Ledger charts are local SVGs; no remote chart library or CDN. */
 .stats-charts svg{display:block;width:100%;min-height:200px}.stats-charts [data-stats-day]{cursor:pointer}.stats-charts [data-stats-day]:hover rect:last-of-type,.stats-charts [data-stats-day]:focus rect:last-of-type{fill:#a78bfa;outline:none}.stats-pie{display:flex;align-items:center;gap:16px}.stats-pie svg{width:42%;min-width:130px}.stats-pie ul{padding:0;list-style:none;font-size:12px}.stats-pie li{margin:10px 0}.reason-dot{display:inline-block;width:10px;height:10px;border-radius:50%;margin-right:7px}#job-log{max-height:65vh;overflow:auto;white-space:pre-wrap}#stats-note{font-size:12px}#stats-detail tr:has(td:first-child):hover{background:#202c43}
 .stats-reasons-card{grid-column:1/-1}#temporary-table .table-wrap{max-height:60vh;overflow:auto}
+[data-stock-type][aria-pressed="true"] {background:#245bcc;border:1px solid #6b9cff;color:#fff}
+[data-stock-type][aria-pressed="false"] {background:#24252b;border:1px solid #444956;color:#bbc8dc}

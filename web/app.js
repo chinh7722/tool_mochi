@@ -1,5 +1,6 @@
 import {installStatistics} from './statistics.js';
 import {installManagement,quotedUnits} from './management.js';
+import {installStock} from './stock.js';
 const $ = id => document.getElementById(id);
 const app = {state: null, csrf: '', connected: false, busy: false, polling: false, needPoll: false,
   generation: 0, loaded: false, page: 'mochi', logJob: '', focusJob: '', selected: {}, recipients: new Set(),
@@ -193,7 +194,7 @@ function saveDraft() {const f=$('job-form'); localStorage.setItem('hoshino.jobDr
 
 document.addEventListener('click',async event=>{
   const nav=event.target.closest('[data-page]'); if(nav) {event.preventDefault(); page(nav.dataset.page); return;}
-  const tabs=event.target.closest('[data-tab]'); if(tabs) {tab(tabs.closest('[data-tabs]').dataset.tabs,tabs.dataset.tab); if(tabs.dataset.tab==='inventory'&&app.connected) batches(); if(tabs.dataset.tab==='running') poll();if(tabs.dataset.tab==='temporary')management.loadTemporary(); return;}
+  const tabs=event.target.closest('[data-tab]'); if(tabs) {tab(tabs.closest('[data-tabs]').dataset.tabs,tabs.dataset.tab); if(tabs.dataset.tab==='inventory'&&app.connected) stock.load(); if(tabs.dataset.tab==='running') poll();if(tabs.dataset.tab==='temporary')management.loadTemporary(); return;}
   const b=event.target.closest('[data-action]');
   if(b) {event.preventDefault(); if(b.disabled) return; const id=b.dataset.id, pool=b.dataset.pool;
     try {switch(b.dataset.action) {
@@ -278,5 +279,6 @@ $('local-address').textContent=location.host; controls();
 async function boot() {try {const bootstrap=new URLSearchParams(location.hash.slice(1)).get('session'); if(bootstrap) {await api('/api/session',{}, {'X-Web-Bootstrap':bootstrap}); history.replaceState(null,'',location.pathname);} const config=await api('/api/config'); app.csrf=config.csrf; field('connection-form','url').value=config.url; $('connection-config').textContent=config.has_token?'Đã có token lưu trên máy; để trống để dùng lại.':'Chưa có token. Nhập token quản lý VPS tại đây.'; await poll(); setInterval(poll,2500);} catch(error) {status(error.message); toast(error.message,true);}}
 const statistics=installStatistics({$,app,api,esc,money,n,time,table,toast,idValue});
 const management=installManagement({$,app,api,command,esc,money,n,time,table,toast,controls,logs});
+const stock=installStock({$,app,api,command,esc,n,time,table,toast,controls});
 setInterval(pollLogs,1000);
 boot();

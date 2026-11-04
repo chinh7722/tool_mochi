@@ -69,6 +69,8 @@ class JobStatisticsMixin:
                 LEFT JOIN customer_orders co USING(job_id) WHERE job_id=?''', (source_id,)).fetchone()
             if source is None or source['finalized_at'] is None or source['status']=='completed':
                 raise ValueError('Chỉ tiếp tục job lỗi hoặc đã dừng còn thiếu bean.')
+            if json.loads(source['schedule_data'] or '{}').get('stock_account_id'):
+                raise ValueError('Job thuộc kho acc. Dùng Tiếp tục trong Kho tài khoản để giữ đúng tiến độ và trạng thái xuất.')
             if db.execute('SELECT 1 FROM job_continuations WHERE source_id=?', (source_id,)).fetchone():
                 raise ValueError('Job đã có lần tiếp tục. Chọn job tiếp tục mới nhất.')
             remaining = source['target_count']-source['success_count']
@@ -142,7 +144,8 @@ class JobStatisticsMixin:
             jobs = self._statistics_rows(db)
             runs = [dict(r) for r in db.execute('''SELECT r.job_id,j.chat_id,u.name,j.code,
                 r.finished_at,r.status,r.reason,r.success_count,j.schedule_data AS _configuration FROM job_runs r
-                JOIN jobs j USING(job_id) JOIN users u USING(chat_id) ORDER BY r.finished_at DESC''')]
+                JOIN jobs j USING(job_id) JOIN users u USING(chat_id)
+                WHERE j.job_id NOT GLOB 'stock_*' ORDER BY r.finished_at DESC''')]
             owners = [dict(r) for r in db.execute('SELECT chat_id,name FROM users ORDER BY name,chat_id')]
         monthly = [r for r in jobs if r['day'] in days]
         daily = {d:dict(day=d, jobs=0, customers=0, unique_customers=0, revenue_units=0,cost_units=0,profit_units=0,pending_jobs=0) for d in days}
@@ -212,10 +215,12 @@ class JobStatisticsMixin:
             clause='FROM jobs j JOIN users u USING(chat_id) WHERE j.finalized_at IS NOT NULL AND NOT EXISTS(SELECT 1 FROM temporary_hidden_jobs h WHERE h.job_id=j.job_id)'
             total=db.execute('SELECT COUNT(*) '+clause).fetchone()[0]
             rows=[dict(r) for r in db.execute('''SELECT j.job_id,j.code,j.chat_id,u.name,j.status,j.target_count,
-                j.success_count,j.failure_count,j.created_at,j.finalized_at,
+                j.success_count,j.failure_count,j.created_at,j.finalized_at,j.schedule_data,
                 (j.status='failed' AND j.success_count<j.target_count AND NOT EXISTS(
                     SELECT 1 FROM job_continuations c WHERE c.source_id=j.job_id)) AS can_continue '''+
                 clause+' ORDER BY j.finalized_at DESC,j.job_id LIMIT ? OFFSET ?',(limit,offset))]
+        for row in rows:
+            if json.loads(row.pop('schedule_data') or '{}').get('stock_account_id'):row['can_continue']=False
         return dict(rows=rows,total=total,offset=offset,limit=limit)
 
     def clear_temporary_history(self):

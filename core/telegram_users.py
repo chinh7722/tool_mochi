@@ -130,7 +130,7 @@ class TelegramUserStore(CustomerAccountsMixin, JobStatisticsMixin):
     _USER_SELECT = '''SELECT u.chat_id, u.name, u.role, u.active,
         COALESCE(SUM(CASE WHEN j.status = 'completed' THEN 1 ELSE 0 END), 0) AS completed_jobs,
         COALESCE(SUM(CASE WHEN j.status = 'failed' THEN 1 ELSE 0 END), 0) AS failed_jobs,
-        COALESCE(SUM(j.requested_beans), 0) AS requested_beans,
+        COALESCE(SUM(CASE WHEN j.job_id NOT GLOB 'stock_*' THEN j.requested_beans ELSE 0 END), 0) AS requested_beans,
         COALESCE(SUM(j.success_count), 0) AS success_count,
         COALESCE(SUM(CASE WHEN co.order_id IS NOT NULL THEN COALESCE(co.charged_units,0)
             WHEN j.status='completed' THEN job_earned(j.success_count,j.target_count,j.sale_rate_units,j.schedule_data) ELSE 0 END), 0) AS revenue_units,

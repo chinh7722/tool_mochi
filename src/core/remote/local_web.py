@@ -15,8 +15,13 @@ import webbrowser
 from core.remote.client import RemoteClient
 from core.remote.protocol import MAX_BODY, RemoteError, encode
 
+READ_COMMANDS = frozenset(('job.logs','statistics.get','history.temporary','stock.list','stock.export.get','stock.exports',
+    'user.jobs','customer.history','finance.ledger','batch.list','history.export','proxy.export'))
+
 COMMANDS = frozenset(('job.create', 'job.stop', 'job.continue', 'job.logs', 'statistics.get', 'proxy.import', 'proxy.check',
     'pricing.save','history.temporary','history.temporary.clear',
+    'stock.create','stock.list','stock.stop','stock.resume','stock.delete','stock.retry',
+    'stock.export.prepare','stock.export.get','stock.export.finish','stock.exports',
     'proxy.rotate', 'proxy.delete', 'proxy.export', 'settings.save', 'telegram.save',
     'telegram.start', 'telegram.stop', 'telegram.broadcast', 'telegram.cancel_broadcast',
     'user.save', 'user.active', 'user.mail_keys', 'user.jobs', 'user.report', 'customer.save',
@@ -219,7 +224,9 @@ class LocalWebHandler(BaseHTTPRequestHandler):
                 self.respond(200, self.server.client.state())
             elif path in ('/api/connect', '/api/command') and write:
                 payload = self.read_json()
-                if not self.server.mutation.acquire(blocking=False):
+                locked = not (path=='/api/command' and isinstance(payload.get('action'),str)
+                    and payload['action'] in READ_COMMANDS)
+                if locked and not self.server.mutation.acquire(blocking=False):
                     self.respond(409, {'error': 'Đang thực hiện một lệnh khác; chờ kết quả trước.'})
                     return
                 try:
@@ -241,7 +248,7 @@ class LocalWebHandler(BaseHTTPRequestHandler):
                         result = self.server.client.command(action, restore_numbers(data), request_id=request_id)
                     self.respond(200, result)
                 finally:
-                    self.server.mutation.release()
+                    if locked:self.server.mutation.release()
             else:
                 self.respond(404, {'error': 'Không tìm thấy chức năng.'})
             return

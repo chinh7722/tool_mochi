@@ -45,6 +45,11 @@ class FakeVPS:
         self.seen={}
         self.offline=False
         self.log_lines=['Đang xử lý job fixture-job','<log is plain text>']
+        self.stock_rows=[dict(id=1,email='stock1@example.test',password='offline-pw1',beans='2000',target=2000,
+            infinite=False,invite_code='STOCK1',status='paused',job_id=None),
+            dict(id=2,email='stock2@example.test',password='offline-pw2',beans='1000',target=2000,
+            infinite=True,invite_code='STOCK2',status='paused',job_id=None)]
+        self.stock_exports={}
         self.temporary_rows=[dict(job_id='temp-failed',code='TEMP',name='Partner A',chat_id=202,
             status='failed',target_count=10,success_count=2,can_continue=True,finalized_at='2026-11-04T09:00:00+07:00')]
 
@@ -62,7 +67,26 @@ class FakeVPS:
             return self.seen[request_id]
         self.commands.append((action,deepcopy(payload),request_id))
         result={'message':'Đã thực hiện trên VPS.'}
-        if action=='job.create':
+        if action=='stock.list':
+            result=dict(rows=deepcopy(self.stock_rows),total=len(self.stock_rows),beans=str(sum(int(r['beans']) for r in self.stock_rows)),batches=[],exports=[],error='',busy=False)
+        elif action=='stock.exports':
+            result={'rows':[dict(id=r['id'],count=len(json.loads(r['account_ids'])),actor=r['actor'],state=r['state'],created_at=r['created_at']) for r in self.stock_exports.values()]}
+        elif action=='stock.create':result=dict(batch_id='stock-fixture',message='Đã lưu lô tạo acc stock-fixture')
+        elif action=='stock.delete':self.stock_rows=[r for r in self.stock_rows if r['id'] not in payload['ids']]
+        elif action=='stock.stop':
+            for row in self.stock_rows:
+                if row['id'] in payload['ids']:row['status']='paused'
+        elif action=='stock.export.prepare':
+            selected=[r for r in self.stock_rows if r['id'] in payload['ids']]
+            result=dict(id='fixture-export',actor='Local',state='pending',account_ids=json.dumps(payload['ids']),
+                content='\n'.join(r['email']+'|'+r['password'] for r in selected),created_at='2026-11-05T09:00:00+07:00')
+            self.stock_exports[result['id']]=deepcopy(result)
+            for row in selected:row['status']='exporting'
+        elif action=='stock.export.get':result=deepcopy(self.stock_exports[payload['export_id']])
+        elif action=='stock.export.finish':
+            record=self.stock_exports[payload['export_id']];record['state']='completed'
+            self.stock_rows=[r for r in self.stock_rows if r['id'] not in json.loads(record['account_ids'])]
+        elif action=='job.create':
             jid='web-job-'+str(len(self.commands))
             self.value['jobs'].append(dict(job_id=jid,invite_code=payload['code'],customer_name=payload.get('customer',''),
                 creator_name='Local',creator_chat_id=None,status='Chờ lượt combo' if payload.get('combo') else 'Đang chờ',

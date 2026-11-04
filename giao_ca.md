@@ -818,3 +818,55 @@ Quy trình phát triển và hoàn thiện công cụ trải qua 8 vòng lặp (
   riêng biệt đã qua trên cả hai nền tảng. Xác minh lại bốn luồng web mới và
   ảnh1120×760; nút từng dòng dùng cỡ nhỏ để không cắt chữ.
 
+# Kho acc tích bean và giao diện quản lý VPS — 05/11/2026
+
+- Người dùng xác nhận chế độ vô hạn = **10 lượt mời/ngày = 1.000 bean**, giữ
+  giới hạn toàn cục 10 lượt/24 giờ và lịch combo sau 24 giờ 1 phút.
+- `core/stock_accounts.py`: SQLite riêng `stock_accounts.sqlite3`, lô tạo,
+  tài khoản có mật khẩu và phiếu xuất hai bước. Mail chưa lấy được mã mời không
+  xuất hiện trong kho acc; biên nhận mail vẫn lưu nội bộ để phục hồi/đối soát.
+  Mua gián đoạn chuyển `uncertain`, không tự gửi lại POST. Login gián đoạn tiếp
+  tục từ mail đã giao; lỗi đăng nhập cho thử lại không mua thêm.
+- `gui/stock_controller.py`: dùng chung ở bản local, VPS và bot; mua đúng một
+  lô ban đầu bằng số acc, tra cứu bằng luồng Google/Mochi đã có, lấy mã/số bean.
+  Tạo combo phần bean thiếu với rate 0, ghi chi phí đúng owner. Lịch giữ product
+  ID và stock_account_id, không giữ API key. Bot admin dùng key riêng, local dùng
+  key chung. Chế độ vô hạn dùng chu kỳ 1.000 bean, chờ 24h1m giữa chu kỳ.
+- Tính bean từ số dư lúc tạo + confirmed successes; dùng quota ledger phục hồi
+  tiến độ nếu crash trước callback Qt. Không tự đồng bộ việc tiêu bean ngoài tool.
+  Dừng/tiếp tục từ Kho tài khoản; khóa Tiếp tục chung trong API/history để acc
+  không chạy lại ngoài quản lý kho sau khi xuất/xóa.
+- API `stock.create/list/stop/resume/delete/retry`, `stock.export.prepare/get/finish`
+  và `stock.exports`. State chung chỉ có tổng/busy/pending_creation, không có mật
+  khẩu. Kho phân trang100; lịch sử xuất phân trang50. Xuất ghi phiếu trước popup,
+  reserve acc rồi đóng popup mới hoàn tất; có thể mở lại phiếu sau mất kết nối.
+  Xóa/xuất bị chặn nếu còn job; không DELETE lịch sử job, tài chính, log.
+- Desktop `gui/stock_widgets.py`, web `web/stock.js`: chọn loại job có sẵn bean,
+  kho acc thay lô mail, email/password/bean/STT/checkbox/Dừng, dừng/tiếp tục hàng
+  loạt, xóa có xác nhận, popup mail|password và lịch sử xuất riêng. Dừng trên hai
+  UI có xác nhận; bot không cần xác nhận dừng. Form/table đã xem ở1120×760.
+- Web local trước đây khóa mọi POST `/api/command`, khiến hai request đọc kho
+  và phiếu xuất cạnh tranh409. Tách READ_COMMANDS khỏi khóa ghi; các lệnh ghi
+  vẫn giữ khóa và UUID journal. Test kiểm tra readonly chạy khi khóa ghi đang
+  giữ, xóa vẫn409; request action sai kiểu vẫn400. Không mở thêm cổng web VPS.
+- `gui/stock_telegram.py`: admin private chat có `/acc_create`, `/accs`, `/acc_info`,
+  `/acc_batches`, `/acc_stop`, `/acc_resume`, `/acc_delete`, `/acc_export`,
+  `/acc_exports`, `/acc_show`, `/acc_done`, `/acc_retry`. Partner/customer bị chặn.
+  Export gửi TXT, kiểm tra lại SQL quyền admin trước gửi; `/acc_done` xác nhận đã
+  nhận thay thao tác đóng popup, tránh xóa khi Telegram chưa giao file.
+- Thêm `main_vps_manager.py` và `Mo_Giao_Dien_Quan_Ly_VPS.bat`; khai báo trong
+  .gitignore allowlist và scripts/prepare_repository.py. Hướng dẫn riêng
+  `KHO_ACC_TICH_BEAN_2026-11-05.md`; root/src phải luôn đồng bộ byte.
+- Lô `stock_…` dùng bản ghi chi phí target/success=0, rate=0. Schema jobs cũ bắt
+  requested_beans>0 nên giữ marker1 nội bộ; USER_SELECT và CSV loại marker này
+  khỏi bean yêu cầu, job_runs kho mua mail bị loại khỏi lượt/mã khách hàng. Vẫn
+  tính chi phí thực và số job, không sửa/xóa ràng buộc bảng tài chính cũ.
+- QA offline: full Windows1060 PASS rồi bổ sung desktop6, các ca kho mới và
+  đọc đồng thời: tổng1071 ca riêng biệt đã qua. Ubuntu full1066, sau sửa lỗi
+  cạnh tranh409 web có195 ca liên quan PASS; bản chốt kế toán99 ca PASS,
+  cũng1071 ca riêng biệt đã qua. Stock31, desktop6, Chromium31, localweb13.
+  Không mua mail/đăng nhập tài khoản thật/gửi bot/thu tiền để kiểm thử.
+  Ảnh `.tmp/stock_creation_desktop.png`, `stock_inventory_desktop.png`,
+  `stock_creation_web.png`, `stock_inventory_web.png`. Gói nguồn427 file,
+  không có data/.tmp/credential; hai launcher mới có trong allowlist Git.
+

@@ -113,16 +113,27 @@ def build_mochi(window):
     window.job_tabs.currentChanged.connect(lambda index:window.refresh_jobs() if index==1 and window.client is not None else None)
     setup,setup_box=card('Thiết lập job')
     choice_row=QHBoxLayout();choice_row.setSpacing(12)
+    window._stock_mode=False
+    window.stock_type_buttons=[]
+    window.stock_type_frames=[]
     for title,subtitle,selected in (('Nhập mã mời để nạp bean','Dùng mã mời khách để nạp bean từ tài khoản mới.',True),
-            ('Tạo account có sẵn bean','Tạo tài khoản và tự nhận thưởng. · Chưa hỗ trợ',False)):
+            ('Tạo account có sẵn bean','Mua mail, tạo acc và tự tích bean theo combo.',False)):
         item,item_box=card()
+        window.stock_type_frames.append(item)
         item.setStyleSheet('QFrame#remoteCard {background:'+('#202c43;border:1px solid #3b82f6;' if selected else '#202023;border:1px solid #383840;')+'}')
-        label=QLabel(title);label.setStyleSheet('font-size:14px;font-weight:700;')
+        label=QPushButton(title);label.setCheckable(True);label.setChecked(selected)
+        label.clicked.connect(lambda _c=False,mode=not selected:window.select_stock_mode(mode))
+        window.stock_type_buttons.append(label)
+        label.setStyleSheet('font-size:14px;font-weight:700;')
         item_box.addWidget(label)
         note=QLabel(subtitle);note.setObjectName('smallMuted');note.setWordWrap(True)
-        item_box.addWidget(note);item.setEnabled(selected)
+        item_box.addWidget(note)
         choice_row.addWidget(item,1)
     setup_box.addLayout(choice_row)
+    from gui.stock_widgets import StockCreateForm
+    window.stock_create_panel=StockCreateForm(lambda a,p,c=None:window.send(a,p,c),
+        lambda:window.snapshot.get('settings',{}).get('product_ids',''),window)
+    window.stock_create_panel.hide();setup_box.addWidget(window.stock_create_panel)
     window.job_code=QLineEdit();window.job_code.setPlaceholderText('VD: A75FNX')
     window.job_customer=QLineEdit();window.job_customer.setPlaceholderText('Tùy chọn (để nhận diện job)')
     window.job_points=QSpinBox();window.job_points.setRange(1,1000000);window.job_points.setValue(1000)
@@ -151,7 +162,8 @@ def build_mochi(window):
     window.job_combo=QCheckBox('Nhập mã mời combo — tự tiếp tục sau 24 giờ 1 phút đến đủ bean')
     window.job_combo.setToolTip('Đạt giới hạn 10 lượt / 24 giờ: lưu tiến độ và tự chạy lượt tiếp theo trên VPS. Có thể dừng job trong thời gian chờ.')
     grid.addWidget(window.job_combo,5,0,1,2)
-    setup_box.addLayout(grid)
+    window.invite_form=QWidget();invite_box=QVBoxLayout(window.invite_form);invite_box.setContentsMargins(0,0,0,0)
+    invite_box.addLayout(grid);setup_box.addWidget(window.invite_form)
     note=QLabel('Giờ Việt Nam · Lịch được lưu và thực hiện trên VPS, kể cả khi đóng ứng dụng quản lý.')
     note.setObjectName('smallMuted');note.setWordWrap(True);setup_box.addWidget(note)
     source,source_box=card()
@@ -159,6 +171,7 @@ def build_mochi(window):
     window.job_source_summary.setObjectName('muted');window.job_source_summary.setWordWrap(True)
     source_box.addWidget(window.job_source_summary)
     setup_box.addWidget(source)
+    window.stock_invite_notes=(note,source)
     actions=QHBoxLayout()
     window.button('Lưu nháp',window.save_job_draft,actions,mutation=False)
     window.button('Cài đặt',lambda:window.activate(5),actions,mutation=False)
@@ -219,6 +232,13 @@ def build_mochi(window):
     window.button('Về thiết lập job',window.open_new_job,actions,mutation=False)
     actions.addStretch();batch_box.addLayout(actions)
     inventory_box.addWidget(batch);inventory_box.addStretch()
+    batch.hide()
+    inventory_box.takeAt(inventory_box.count()-1)
+    from gui.stock_widgets import remote_inventory
+    window.stock_inventory_panel=remote_inventory(window)
+    inventory_box.addWidget(window.stock_inventory_panel,1)
+    inventory_box.itemAt(0).widget().hide()
+    window.workspace_tabs.currentChanged.connect(lambda i:window.stock_inventory_panel.load() if i==1 else None)
     window.workspace_stack.addWidget(inventory)
     lookup=QWidget();lookup_box=QVBoxLayout(lookup);lookup_box.setContentsMargins(0,12,0,0)
     lookup_box.addWidget(heading('Lấy mã mời tài khoản','Đăng nhập Google để lấy mã mời Mochi, tên hiển thị và số dư beans hiện tại.'))

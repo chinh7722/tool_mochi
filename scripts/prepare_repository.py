@@ -6,7 +6,8 @@ from pathlib import Path
 import zipfile
 
 ROOT = Path(__file__).resolve().parents[1]
-ENTRYPOINTS = ('main_mochi_gui.py','main_mochi_server.py','main_mochi_web.py','cli_mochi.py',
+ENTRYPOINTS = ('main_mochi_gui.py','main_mochi_server.py','main_mochi_web.py','main_vps_manager.py','cli_mochi.py',
+    'Mo_Giao_Dien_Quan_Ly_VPS.bat',
     'Launch_HoshinoTool.bat','Launch_MochiTool.bat','Launch_VPS_Manager.bat','Launch_Web_VPS_Manager.bat','Open_VPS_Tunnel.bat',
     '.gitignore','.gitattributes','requirements.txt','requirements-core.txt')
 

@@ -128,6 +128,15 @@ class LocalWebServerTests(unittest.TestCase):
         finally: self.server.mutation.release()
         self.assertFalse(self.fixture.fake.commands)
 
+    def test_read_only_stock_requests_do_not_compete_for_the_mutation_lock(self):
+        self.server.mutation.acquire()
+        try:
+            code,_,raw=self.post(dict(action='stock.list',payload={}))
+            self.assertEqual(code,200)
+            self.assertEqual(json.loads(raw)['result']['total'],2)
+            self.assertEqual(self.post(dict(action='stock.delete',payload={'ids':[1]}))[0],409)
+        finally:self.server.mutation.release()
+
     def test_browser_management_does_not_import_runtime_or_stop_vps_jobs(self):
         self.assertNotIn('core.remote.runtime',sys.modules)
         self.assertNotIn('PySide6.QtWidgets',sys.modules)

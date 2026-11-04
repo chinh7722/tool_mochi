@@ -640,7 +640,7 @@ class MochiChatPage(QWidget):
         type_row.setSpacing(12)
         type_row.addWidget(self.card_invite, 1)
         self.card_stock = _JobTypeCard("STOCK_ACCOUNT", "Tạo account có sẵn bean",
-            "Tạo tài khoản và tự nhận thưởng.", icon_str="▤", badge="Chưa hỗ trợ", parent=self)
+            "Mua mail, tạo acc và tự tích bean theo combo.", icon_str="▤", badge="", parent=self)
         self.card_stock.setEnabled(False)
         type_row.addWidget(self.card_stock, 1)
         card_layout.addLayout(type_row)
@@ -1527,11 +1527,15 @@ class MochiChatPage(QWidget):
 
     def _on_start_clicked(self, *, code=None, points=None, customer_name=None, before_start=None,
             creator_name='Local', creator_chat_id=None, scheduled_at=None, _scheduled_record=None,
-            mail_api_keys=None, combo=False):
+            mail_api_keys=None, combo=False, mail_product_ids=None):
         if self._closing_jobs:
             self._set_validation_message('Tool đang đóng; không nhận thêm job mới.')
             return None
         local_request = code is None
+        if local_request and getattr(self,'_job_type','CUSTOMER_INVITE')=='STOCK_ACCOUNT':
+            if hasattr(self,'stock_create_panel'):
+                return self.stock_create_panel.create()
+            return None
         combo = (_scheduled_record.combo if _scheduled_record else
             self.chk_combo_job.isChecked() if local_request else combo)
         if type(combo) is not bool:
@@ -1572,11 +1576,11 @@ class MochiChatPage(QWidget):
                 selected.time().hour(),selected.time().minute(),tzinfo=VIETNAM_TIME)
         if scheduled_at is not None:
             return self._create_scheduled_job(code, points, customer_name, total_vnd, scheduled_at,
-                before_start, creator_name, creator_chat_id, combo=combo)
+                before_start, creator_name, creator_chat_id, combo=combo, mail_product_ids=mail_product_ids)
         if combo and _scheduled_record is None:
             # Persist ownership, target and any customer hold before the first run.
             return self._create_scheduled_job(code, points, customer_name, total_vnd, None,
-                before_start, creator_name, creator_chat_id, combo=True)
+                before_start, creator_name, creator_chat_id, combo=True, mail_product_ids=mail_product_ids)
         if _scheduled_record is not None:
             total_vnd = _scheduled_record.total_vnd
             if _scheduled_record.success_count >= target_accs:
@@ -1627,7 +1631,8 @@ class MochiChatPage(QWidget):
         if not use_mail_batch:
             if prov == MULTI_SHOP:
                 try:
-                    choices = parse_mail_priority(self.input_pids.text())
+                    choices = parse_mail_priority((getattr(_scheduled_record,'mail_product_ids',None)
+                        if _scheduled_record else mail_product_ids) or self.input_pids.text())
                     keys = effective_keys
                     for choice in choices:
                         if not keys[choice.provider]:
@@ -1642,7 +1647,7 @@ class MochiChatPage(QWidget):
         self._set_validation_message("")
 
         prov = self.combo_provider.currentData()
-        pids = self.input_pids.text().strip()
+        pids = (getattr(_scheduled_record,'mail_product_ids',None) if _scheduled_record else mail_product_ids) or self.input_pids.text().strip()
         concurrency = self.spin_concurrency.value()
         headless = self.chk_headless.isChecked()
 
@@ -1818,7 +1823,7 @@ class MochiChatPage(QWidget):
                 color='#60a5fa', job_id=job_id)
         return job_id
 
-    def _create_scheduled_job(self, code, points, customer, total_vnd, when, registrar, creator, chat_id, *, combo=False):
+    def _create_scheduled_job(self, code, points, customer, total_vnd, when, registrar, creator, chat_id, *, combo=False, mail_product_ids=None):
         try:
             when = schedule_time(when, future=True) if when is not None else datetime.now(VIETNAM_TIME)
             if not re.fullmatch(r'[A-Z0-9_-]{1,64}', code) or not 1 <= points <= 1_000_000:
@@ -1834,6 +1839,8 @@ class MochiChatPage(QWidget):
                 source_mail_batch=str(Path(source).expanduser().resolve()) if source else None)
             if combo:
                 data['combo'] = True
+            if mail_product_ids is not None:
+                data['mail_product_ids'] = mail_product_ids
             target = required_mochi_invitation_accounts(points)
             if not registrar(job_id, code, points, target, scheduled_at=when.isoformat(), schedule_data=data):
                 raise ValueError('Yêu cầu này đã có job; không tạo thêm lịch trùng.')
@@ -1863,6 +1870,8 @@ class MochiChatPage(QWidget):
         record.created_at = datetime.fromisoformat(job['created_at']).astimezone(VIETNAM_TIME)
         record.scheduled_at = when
         record.source_mail_batch = data.get('source_mail_batch')
+        record.mail_product_ids = data.get('mail_product_ids')
+        record.stock_account_id = data.get('stock_account_id')
         record.total_vnd = int(data.get('total_vnd') or 0)
         record.combo = data.get('combo', False) is True
         record.success_count = int(job.get('success_count') or 0)
@@ -2376,6 +2385,7 @@ class MochiChatPage(QWidget):
 
     def shutdown_workers(self):
         self._closing_jobs = True
+        stock_busy = self.stock_controller.shutdown() if hasattr(self,'stock_controller') else False
         self._schedule_timer.stop()
         lookup_busy=self.account_lookup_page.shutdown_workers()
         pending_save = False
@@ -2399,7 +2409,7 @@ class MochiChatPage(QWidget):
         for worker in workers:
             if worker.isRunning():
                 worker.request_cancel()
-        return lookup_busy or pending_save or any(worker.isRunning() for worker in workers)
+        return stock_busy or lookup_busy or pending_save or any(worker.isRunning() for worker in workers)
 
     def closeEvent(self, event):
         if self.shutdown_workers():

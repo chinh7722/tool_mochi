@@ -62,7 +62,8 @@ class Runtime:
                 'status', 'target_count', 'success_count', 'failure_count', 'attempted_count',
                 'created_at', 'scheduled_at', 'combo')})
             jobs[-1]['can_continue'] = (record.is_terminal and record.success_count < record.target_count
-                and record.job_id not in m._workers and record.job_id not in continued)
+                and record.job_id not in m._workers and record.job_id not in continued
+                and not getattr(record,'stock_account_id',None))
         def proxies(page):
             rows = []
             for item in list(page._proxies.values())[:2000]:
@@ -93,6 +94,9 @@ class Runtime:
                 transactions=t.store.list_sepay_transactions()[:500]),
             lookup=dict(busy=lookup._worker is not None, status=lookup.lbl_status.text(),
                 profiles=[asdict(p) for p in lookup._profiles]), settings=self.configuration())
+        stock=m.stock_controller
+        result['stock']=dict(stock.store.summary(),busy=stock.worker is not None,
+            pending_creation=any(b['state'] in ('queued','buying','creating') for b in stock.store.batches()))
         return result
 
     def configuration(self):
@@ -113,6 +117,8 @@ class Runtime:
         actions = {name: getattr(self, 'do_' + name.replace('.', '_')) for name in (
             'job.create', 'job.stop', 'job.continue', 'job.logs', 'statistics.get', 'proxy.import', 'proxy.check', 'proxy.rotate',
             'pricing.save','history.temporary','history.temporary.clear',
+            'stock.create','stock.list','stock.stop','stock.resume','stock.delete','stock.retry',
+            'stock.export.prepare','stock.export.get','stock.export.finish','stock.exports',
             'proxy.delete', 'settings.save', 'telegram.save', 'telegram.start', 'telegram.stop',
             'telegram.broadcast', 'telegram.cancel_broadcast', 'user.save', 'user.active',
             'user.mail_keys', 'user.jobs', 'user.report', 'customer.save', 'customer.delete', 'customer.balance',
@@ -122,6 +128,38 @@ class Runtime:
         if action not in actions or not isinstance(data, dict):
             raise RemoteError('Lệnh quản lý không được hỗ trợ.')
         return actions[action](data) or {'message': 'Đã nhận lệnh.'}
+
+    def do_stock_create(self,data):
+        return self.mochi.stock_controller.create(integer(data,'count',maximum=500),
+            integer(data,'beans',maximum=1_000_000),data.get('infinite',False),text_field(data,'product_ids',maximum=1000))
+
+    def do_stock_list(self,data):
+        return self.mochi.stock_controller.list(integer(data,'offset',minimum=0,maximum=10_000_000) if 'offset' in data else 0)
+
+    def do_stock_stop(self,data):
+        return self.mochi.stock_controller.stop(data.get('ids'))
+
+    def do_stock_resume(self,data):
+        return self.mochi.stock_controller.resume(data.get('ids'))
+
+    def do_stock_delete(self,data):
+        count=self.mochi.stock_controller.store.delete(data.get('ids'))
+        return {'message':f'Đã xóa {count} acc khỏi kho. Lịch sử job và tài chính vẫn được giữ.'}
+
+    def do_stock_retry(self,data):
+        return self.mochi.stock_controller.retry_batch(text_field(data,'batch_id',maximum=80))
+
+    def do_stock_export_prepare(self,data):
+        return self.mochi.stock_controller.store.prepare_export(data.get('ids'),'Local')
+
+    def do_stock_export_get(self,data):
+        return self.mochi.stock_controller.store.export(text_field(data,'export_id',maximum=40))
+
+    def do_stock_export_finish(self,data):
+        return self.mochi.stock_controller.store.finish_export(text_field(data,'export_id',maximum=40))
+
+    def do_stock_exports(self,data):
+        return {'rows':self.mochi.stock_controller.store.exports(integer(data,'offset',minimum=0,maximum=10_000_000) if 'offset' in data else 0)}
 
     def do_job_create(self, data):
         code = text_field(data, 'code', maximum=64).strip().upper()
