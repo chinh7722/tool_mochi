@@ -229,7 +229,7 @@ class JobSyncTests(unittest.TestCase):
         result=self.runtime.command('job.logs',dict(job_id=jid,cursor=cursor,epoch=self.window._log_epoch))
         self.assertEqual(result['lines'],[])
         self.assertFalse(result['reset'])
-        self.runtime.log_epoch='new-runtime'
+        self.runtime.log_store.epoch='new-runtime'
         self.window.poll_logs()
         self.until(lambda:self.window._log_epoch=='new-runtime','log epoch not reset')
         self.assertEqual(self.window.logs.toPlainText().count('FIRST LIVE LINE'),1)
@@ -274,8 +274,51 @@ class JobSyncTests(unittest.TestCase):
         self.assertEqual(panel.history.rowCount(),2)  # job and owner total
         report=self.runtime.command('statistics.get',dict(month=panel.month.date().toString('yyyy-MM')))
         self.assertEqual((report['total'],report['customer_total']),(1,1))
-        self.assertEqual(len(panel.charts),3)
+        self.assertEqual(len(panel.charts),4)
         self.assertIn('TỔNG',panel.history.item(1,0).text())
+
+
+    def test_price_milestone_saved_over_http_is_snapshotted_for_local_job(self):
+        self.window.send('pricing.save',dict(prices=[dict(beans=2000,price_units=1500000)]))
+        self.until(lambda:not self.window._mutating,'price save stayed busy')
+        jid=self.desktop_create('PRICE',points=1000)
+        import json
+        job=self.runtime.telegram.store.get_job(jid)
+        self.assertEqual(json.loads(job.schedule_data)['price_total_units'],750000)
+        self.assertEqual(job.sale_rate_units,75000)
+
+    def test_temporary_clear_uses_confirmation_and_keeps_permanent_job_and_log(self):
+        from PySide6.QtWidgets import QMessageBox
+        jid=self.desktop_create('TEMP',points=1000)
+        self.until(lambda:not self.window._mutating,'create busy')
+        m=self.runtime.mochi;m._append_log_line('KEEP TEMP LOG',job_id=jid)
+        m._on_job_finished(MochiInviteJobSummary(jid,'TEMP',10,3,0,3,0,'failed',()))
+        m._on_worker_stopped(jid)
+        self.window.mochi_tabs.setCurrentIndex(3)
+        panel=self.window.temporary_panel
+        self.until(lambda:panel.total==1,'temporary outcome missing')
+        self.assertTrue(panel.table._rows[0]['can_continue'])
+        with patch('gui.remote_management_pages.QMessageBox.question',return_value=QMessageBox.StandardButton.No):panel.clear()
+        self.assertNotIn('history.temporary.clear',self.bridge.commands)
+        with patch('gui.remote_management_pages.QMessageBox.question',return_value=QMessageBox.StandardButton.Yes):panel.clear()
+        self.until(lambda:panel.total==0,'temporary outcome not hidden')
+        self.assertIsNotNone(self.runtime.telegram.store.get_job(jid))
+        self.assertIn('KEEP TEMP LOG',self.runtime.command('job.logs',dict(job_id=jid))['lines'])
+        month=panel.window.statistics_panel.month.date().toString('yyyy-MM')
+        self.assertEqual(self.runtime.command('statistics.get',dict(month=month))['total'],1)
+
+    def test_log_survives_real_runtime_recreation_while_desktop_keeps_same_cursor(self):
+        self.runtime.mochi._append_log_line('COMBO DAY ONE',job_id='combo-log')
+        self.window.open_job_logs('combo-log')
+        self.until(lambda:'COMBO DAY ONE' in self.window.logs.toPlainText(),'first log missing')
+        epoch=self.window._log_epoch
+        self.runtime.shutdown()
+        old=self.runtime;self.runtime=Runtime(self.directory);self.bridge.runtime=self.runtime
+        self.runtime.mochi._append_log_line('COMBO DAY TWO',job_id='combo-log')
+        self.until(lambda:'COMBO DAY TWO' in self.window.logs.toPlainText(),'persisted combo log missing')
+        self.assertEqual(self.window._log_epoch,epoch)
+        self.assertEqual(self.window.logs.toPlainText().count('COMBO DAY ONE'),1)
+        for page in (old.telegram,old.mochi,old.proxy,old.mail_proxy):page.deleteLater()
 
 
 if __name__ == '__main__':

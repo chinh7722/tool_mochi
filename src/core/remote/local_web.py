@@ -16,6 +16,7 @@ from core.remote.client import RemoteClient
 from core.remote.protocol import MAX_BODY, RemoteError, encode
 
 COMMANDS = frozenset(('job.create', 'job.stop', 'job.continue', 'job.logs', 'statistics.get', 'proxy.import', 'proxy.check',
+    'pricing.save','history.temporary','history.temporary.clear',
     'proxy.rotate', 'proxy.delete', 'proxy.export', 'settings.save', 'telegram.save',
     'telegram.start', 'telegram.stop', 'telegram.broadcast', 'telegram.cancel_broadcast',
     'user.save', 'user.active', 'user.mail_keys', 'user.jobs', 'user.report', 'customer.save',
@@ -45,6 +46,10 @@ def restore_numbers(payload):
     if isinstance(payload.get('recipients'), list):
         payload['recipients'] = [int(v) if isinstance(v, str) and re.fullmatch(r'[0-9]{1,19}', v)
             else v for v in payload['recipients']]
+    if isinstance(payload.get('prices'),list):
+        payload['prices']=[{**row,'price_units':int(row['price_units'])}
+            if isinstance(row,dict) and isinstance(row.get('price_units'),str) and re.fullmatch(r'[0-9]{1,19}',row['price_units']) else row
+            for row in payload['prices']]
     return payload
 
 

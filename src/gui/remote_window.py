@@ -97,6 +97,7 @@ class RemoteMainWindow(QMainWindow):
             button.setChecked(number==index)
         if index==6 and hasattr(self,'statistics_panel'):
             self.statistics_panel.load()
+        if index==7 and self.snapshot:self.page_contents[7].refresh(self.snapshot)
 
     def page(self,caption):
         widget=QWidget()
@@ -129,6 +130,7 @@ class RemoteMainWindow(QMainWindow):
             view.set_actions_enabled(active)
         for button,allowed in self._job_row_buttons:
             button.setEnabled(active and allowed)
+        if hasattr(self,'temporary_panel'):self.temporary_panel.set_enabled(active)
         if hasattr(self,'telegram_presentation'):
             self.telegram_presentation.update_broadcast_controls()
 
@@ -543,6 +545,7 @@ class RemoteMainWindow(QMainWindow):
             lines=result.get('lines',[])
             if lines:self.logs.appendPlainText('\n'.join(lines))
             self._log_cursor=result.get('cursor');self._log_epoch=result.get('epoch')
+            self.job_log_filter.setText('Job: '+jid+(' · Đang tải log đã lưu…' if result.get('has_more') else ' · Tự cập nhật mỗi giây'))
             if at_end:scroll.setValue(scroll.maximum())
         worker=self.task(lambda:client.command('job.logs',payload),display)
         worker.finished.connect(lambda:setattr(self,'_log_polling',False))
@@ -577,7 +580,12 @@ class RemoteMainWindow(QMainWindow):
         self.job_account_count.setText(f'(= {count:,} accounts)')
         rate=self.snapshot.get('settings',{}).get('sale_rate','')
         try:
-            amount=Decimal(str(rate))*count
+            from core.pricing import quote_prices
+            from core.finance import money_units
+            prices=self.snapshot.get('settings',{}).get('prices',[])
+            quote=quote_prices(prices,self.job_points.value(),money_units(rate) if str(rate).strip() else None)
+            if quote['total_units'] is None:raise ValueError()
+            amount=Decimal(quote['total_units'])/100
             if not amount.is_finite():
                 raise ValueError()
             self.job_quote.setText(format(amount,',.2f').rstrip('0').rstrip('.'))
@@ -624,6 +632,7 @@ class RemoteMainWindow(QMainWindow):
             self.enable_actions(False)
             return
         self.snapshot=state
+        if 7 in self.page_contents:self.page_contents[7].refresh(state)
         self._connected=True
         self.enable_actions(not state.get('closing',False))
         self.btn_connection.setText('●  Đã kết nối VPS')

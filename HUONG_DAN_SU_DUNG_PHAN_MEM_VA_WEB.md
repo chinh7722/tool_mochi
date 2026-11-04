@@ -2,6 +2,11 @@
 
 *Cập nhật: 04/11/2026.*
 
+> **[Bảng giá, khách hàng theo mã mời và lịch sử tạm](BANG_GIA_LICH_SU_TAM_VA_LOG_2026-11-04.md):**
+> cấu hình giá theo tỷ lệ mốc bean tại tab Bảng giá. Lịch sử tạm ở Mochi có
+> Log/Tiếp tục/Xóa có xác nhận; lịch sử Thống kê không bị xóa. Log combo được
+> lưu bền vững và ô Ngày xem trong thống kê có lựa chọn cả tháng.
+
 > **Mới:** [Thống kê, tiếp tục job và mua mail bù](THONG_KE_VA_TIEP_TUC_JOB_2026-11-04.md).
 > Lịch sử job chuyển sang **Thống kê**, có lọc người/tất cả và bấm biểu đồ để xem
 > chi tiết. Job có nút **Tiếp tục**, xác nhận trước khi dừng; **Log** tự cập nhật.
@@ -221,6 +226,7 @@ kiểm tra log và xử lý nguyên nhân.
 | **Đồng bộ VPS** | Lấy danh sách và trạng thái mới |
 | **Dừng** tại từng job | Xác nhận rồi dừng job hoặc hủy lịch chờ của job đó |
 | **Tiếp tục** tại từng job | Tạo job mới cho phần bean còn thiếu, giữ người sở hữu/đơn giá |
+| **Mochi Chat → Lịch sử tạm** | Xem log, tiếp tục job thất bại hoặc xóa danh sách tạm có xác nhận; không xóa Thống kê |
 | **Thống kê → Lịch sử job / Chi tiết** | Chọn tháng, từng người/tất cả, phân trang và xuất CSV lịch sử |
 
 Job đang xử lý/chờ được ưu tiên, các job mới nằm trước. Sau khi tạo, giao diện
@@ -231,6 +237,10 @@ và xem trạng thái trước khi gửi thêm lệnh tạo job.
 
 Với combo, số bean trong bảng là tổng đã đạt qua các đợt. Khi hủy đơn khách,
 hệ thống tính theo bean đã thành công và hoàn phần tiền chưa dùng.
+
+Tab **Bảng giá** cho phép khai báo, ví dụ 2.000 bean = 15.000 VND. Khi lưu,
+job mới tính theo tỷ lệ mốc (1.000 bean = 7.500 VND); job đã tạo giữ giá cũ.
+Nếu bảng rỗng, dùng lại đơn giá VND / 100 bean ở Cài đặt chung.
 
 Tab **Thống kê** có biểu đồ lợi nhuận, số job và lượt khách theo ngày của tháng,
 cùng biểu đồ tròn tỷ lệ lý do lỗi. Bấm cột để xem danh sách job theo người,

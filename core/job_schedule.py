@@ -24,11 +24,15 @@ def schedule_text(value):
 
 def schedule_storage(value=None, data=None):
     data = {} if data is None else data
-    allowed = {'customer_name', 'creator_name', 'total_vnd', 'source_mail_batch', 'combo'}
+    allowed = {'customer_name', 'creator_name', 'total_vnd', 'source_mail_batch', 'combo',
+        'price_total_units','price_source_beans','price_source_units'}
     if not isinstance(data, dict) or set(data) - allowed:
         raise ValueError('Thông tin lịch job không hợp lệ.')
     if 'combo' in data and type(data['combo']) is not bool:
         raise ValueError('Chế độ combo phải là giá trị bật hoặc tắt.')
+    for key in ('price_total_units','price_source_beans','price_source_units'):
+        if key in data and (type(data[key]) is not int or not 0<=data[key]<=2**63-1):
+            raise ValueError('Giá đã chốt của job không hợp lệ.')
     payload = json.dumps(data, ensure_ascii=False)
     if len(payload) > 16000:
         raise ValueError('Thông tin lịch job quá dài.')

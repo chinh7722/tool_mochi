@@ -33,10 +33,13 @@ class Runtime:
         self.mail_proxy = MailProxyPage(settings=self.settings)
         self.mochi = MochiChatPage(settings=self.settings, proxy_page=self.proxy)
         self.mochi.mail_proxy_page = self.mail_proxy
+        from core.job_log_store import JobLogStore
+        self.log_store=JobLogStore(self.directory/'job_logs.sqlite3')
+        self.mochi.log_recorder=self.log_store.append
         self.telegram = TelegramPage(settings=self.settings, mochi_page=self.mochi)
         self.proxy.proxies_updated.connect(self.mochi._update_proxy_tab_status)
         self.closing = False
-        self.log_epoch = uuid.uuid4().hex
+        self.log_epoch = self.log_store.epoch
         self.mochi.chk_headless.setChecked(True)
 
     def shutdown(self):
@@ -45,6 +48,7 @@ class Runtime:
         states = [self.telegram.shutdown_workers(), self.mochi.shutdown_workers(),
                   self.proxy.shutdown_workers(), self.mail_proxy.shutdown_workers()]
         self.settings.sync()
+        if not any(states):self.log_store.close()
         return any(states)
 
     def state(self):
@@ -100,13 +104,15 @@ class Runtime:
             app_proxy=m.chk_app_login_via_proxy.isChecked(), redeem_proxy=m.chk_redeem_via_proxy.isChecked(),
             has_gmailvip_key=bool(m.input_gmailvip_key.text()),
             has_one_trieu_key=bool(m.input_1trieumail_key.text()),
-            sale_rate=str(self.settings.value('finance/sale_rate_per_100', '') or ''))
+            sale_rate=str(self.settings.value('finance/sale_rate_per_100', '') or ''),
+            prices=__import__('core.pricing',fromlist=['read_prices']).read_prices(self.settings))
 
     def command(self, action, data):
         if self.closing:
             raise RemoteError('VPS đang dừng dịch vụ; không nhận lệnh mới.')
         actions = {name: getattr(self, 'do_' + name.replace('.', '_')) for name in (
             'job.create', 'job.stop', 'job.continue', 'job.logs', 'statistics.get', 'proxy.import', 'proxy.check', 'proxy.rotate',
+            'pricing.save','history.temporary','history.temporary.clear',
             'proxy.delete', 'settings.save', 'telegram.save', 'telegram.start', 'telegram.stop',
             'telegram.broadcast', 'telegram.cancel_broadcast', 'user.save', 'user.active',
             'user.mail_keys', 'user.jobs', 'user.report', 'customer.save', 'customer.delete', 'customer.balance',
@@ -153,15 +159,19 @@ class Runtime:
 
     def do_job_logs(self, data):
         jid = text_field(data, 'job_id', maximum=80)
-        lines = self.mochi._job_logs.get(jid, [])
-        cursor = data.get('cursor')
-        if cursor is not None and (type(cursor) is not int or cursor<0):
-            raise RemoteError('Vị trí log không hợp lệ.')
-        reset = cursor is None or data.get('epoch')!=self.log_epoch or cursor>len(lines)
-        start = max(0,len(lines)-1000) if reset else cursor
-        end = min(len(lines), start+1000)
-        return {'lines': [html.unescape(re.sub('<[^>]+>', '', line)) for line in lines[start:end]],
-            'cursor':end,'epoch':self.log_epoch,'reset':reset,'job_id':jid}
+        return self.log_store.read(jid,data.get('cursor'),data.get('epoch'))
+
+    def do_pricing_save(self,data):
+        from core.pricing import validate_prices,SETTING
+        prices=validate_prices(data.get('prices'))
+        self.settings.setValue(SETTING,json.dumps(prices));self.settings.sync()
+        return dict(prices=prices,message='Đã lưu bảng giá; áp dụng theo tỷ lệ cho job tạo mới.')
+
+    def do_history_temporary(self,data):
+        return self.telegram.store.temporary_history(offset=data.get('offset',0),limit=data.get('limit',100))
+
+    def do_history_temporary_clear(self,data):
+        return self.telegram.store.clear_temporary_history()
 
     def do_job_continue(self, data):
         jid = text_field(data,'job_id',maximum=80)

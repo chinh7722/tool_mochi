@@ -57,6 +57,11 @@ và số dư được chuyển chính xác giữa web và API.
 
 ## Đóng và kết nối lại
 
+Tab **Bảng giá** lưu các mốc bean/giá và tính tỷ lệ cho job mới. **Mochi Chat →
+Lịch sử tạm** có Log/Tiếp tục và xóa có xác nhận; xóa chỉ ẩn danh sách tạm,
+không tác động lịch sử Thống kê. Log được lưu trên VPS qua restart. Thống kê
+có thêm biểu đồ mã mời duy nhất mỗi ngày và ô Ngày xem với lựa chọn cả tháng.
+
 Mục **Thống kê** trên thanh bên có các biểu đồ theo tháng, bấm cột để xem chi
 tiết theo ngày và người. Lịch sử job đã chuyển vào đây, có bộ lọc người/tất cả.
 Nút **Tiếp tục** ở từng job tạo phần bean còn thiếu; **Dừng** hỏi xác nhận.

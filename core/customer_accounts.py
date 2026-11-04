@@ -183,20 +183,24 @@ class CustomerAccountsMixin:
     def record_customer_order(self, job_id, customer_id, code, points, target_count,
             fingerprint, update_id, rate_units, *, scheduled_at=None, schedule_data=None):
         scheduled_at, schedule_data = schedule_storage(scheduled_at, schedule_data)
+        from core.pricing import price_snapshot
+        quoted=price_snapshot(schedule_data)
         customer_id = chat_id(customer_id)
         if (type(points) is not int or not 1<=points<=1_000_000 or not isinstance(code,str)
                 or re.fullmatch(r'[A-Za-z0-9_-]{1,64}',code) is None):
             raise ValueError('Mã mời hoặc số bean của đơn hàng không hợp lệ.')
         if (type(rate_units) is not int or rate_units <= 0 or type(target_count) is not int
                 or target_count <= 0 or target_count != (points + 99) // 100
-                or rate_units > MAX_MONEY_UNITS // target_count):
+                or (quoted is None and rate_units > MAX_MONEY_UNITS // target_count)):
             raise ValueError('Chưa cấu hình đơn giá hợp lệ cho đơn khách hàng.')
         if not isinstance(job_id, str) or not job_id or len(job_id)>120:
             raise ValueError('Mã job không hợp lệ.')
         if (type(update_id) is not int or not 0<=update_id<=2**63-1 or not isinstance(fingerprint,str)
                 or not 1<=len(fingerprint)<=128):
             raise ValueError('Yêu cầu đặt đơn không hợp lệ.')
-        reserved = rate_units * target_count
+        reserved = quoted if quoted is not None else rate_units * target_count
+        if reserved<=0 or reserved>MAX_MONEY_UNITS:
+            raise ValueError('Tổng giá đơn khách không hợp lệ.')
         with self._connection(write=True) as db:
             previous = db.execute('SELECT job_id FROM jobs WHERE (bot_fingerprint=? AND update_id=?) OR job_id=?',
                 (fingerprint, update_id, job_id)).fetchone()
@@ -229,13 +233,14 @@ class CustomerAccountsMixin:
             return True
 
     def _settle_customer_order(self, db, job_id):
-        order = db.execute('''SELECT o.*, j.success_count, j.target_count, j.sale_rate_units
+        order = db.execute('''SELECT o.*, j.success_count, j.target_count, j.sale_rate_units,j.schedule_data
             FROM customer_orders o JOIN jobs j ON j.job_id=o.job_id
             WHERE o.job_id=? AND o.settled_at IS NULL''', (job_id,)).fetchone()
         if order is None:
             return
         # A failed/cancelled order still pays for confirmed successful beans.
-        charge = min(order['success_count'], order['target_count']) * order['sale_rate_units']
+        from core.pricing import earned_units
+        charge = earned_units(min(order['success_count'],order['target_count']),order['target_count'],order['sale_rate_units'],order['schedule_data'])
         refund = order['reserved_units'] - charge
         if refund:
             self._wallet_entry(db,order['chat_id'],'refund',refund,'refund:'+order['order_id'],

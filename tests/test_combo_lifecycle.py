@@ -333,6 +333,16 @@ class ComboLifecycleTests(unittest.TestCase):
         recovered._check_scheduled_jobs(Clock.current)
         self.assertEqual(recovered._workers[jid].runner.failure_budget_used,4)
 
+    def test_customer_bot_order_uses_milestone_quote_and_keeps_it_when_prices_change(self):
+        import json
+        from core.pricing import SETTING
+        self.settings.setValue(SETTING,json.dumps([dict(beans=5500,price_units=3500000)]))
+        jid=self.customer()
+        self.assertEqual(self.store.get_customer_order_for_job(jid)['reserved_units'],3500000)
+        self.settings.setValue(SETTING,json.dumps([dict(beans=5500,price_units=5500000)]))
+        self.dispatch(jid);self.finish_round(jid,10,1,'failed')
+        self.assertEqual(self.store.get_customer_order_for_job(jid)['charged_units'],3500000*10//55)
+
 
 if __name__ == '__main__':
     unittest.main()

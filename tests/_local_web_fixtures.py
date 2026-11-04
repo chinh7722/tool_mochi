@@ -45,6 +45,8 @@ class FakeVPS:
         self.seen={}
         self.offline=False
         self.log_lines=['Đang xử lý job fixture-job','<log is plain text>']
+        self.temporary_rows=[dict(job_id='temp-failed',code='TEMP',name='Partner A',chat_id=202,
+            status='failed',target_count=10,success_count=2,can_continue=True,finalized_at='2026-11-04T09:00:00+07:00')]
 
     def factory(self,url,token):
         RemoteClient(url,token)  # Validate actual connection constraints without connecting.
@@ -75,7 +77,7 @@ class FakeVPS:
         elif action=='statistics.get':
             from calendar import monthrange
             month=payload['month'];year,number=map(int,month.split('-'))
-            days=[dict(day=f'{month}-{d:02}',jobs=1 if d==4 else 0,customers=2 if d==4 else 0,
+            days=[dict(day=f'{month}-{d:02}',jobs=1 if d==4 else 0,customers=2 if d==4 else 0,unique_customers=1 if d==4 else 0,
                 revenue_units=300000,cost_units=20000,profit_units=280000,pending_jobs=0) for d in range(1,monthrange(year,number)[1]+1)]
             selected=payload.get('owner_id')
             owners=[dict(chat_id=202,name='Partner A'),dict(chat_id=303,name='Partner B')]
@@ -86,7 +88,14 @@ class FakeVPS:
             result=dict(month=month,days=days,owners=[dict(chat_id=202,name='Partner A'),dict(chat_id=303,name='Partner B')],
                 customer_counts=dict(today=2,week=3,month=4),reasons=[dict(reason='Google lỗi',count=1)],
                 users=[dict(**o,jobs=1,revenue_units=300000,cost_units=20000,profit_units=280000,pending_jobs=0) for o in owners],
-                history=rows,customer_history=rows,total=len(rows),customer_total=len(rows),note='Offline statistics fixture')
+                history=rows,customer_history=rows,total=len(rows),customer_total=len(rows),note='Offline statistics fixture',
+                code_history=[dict(day=month+'-04',code='ONECODE',runs=2,owners=owners)],code_total=1)
+        elif action=='history.temporary':result=dict(rows=deepcopy(self.temporary_rows),total=len(self.temporary_rows))
+        elif action=='history.temporary.clear':self.temporary_rows=[]
+        elif action=='pricing.save':
+            self.value['settings']['prices']=deepcopy(payload['prices'])
+            result=dict(prices=deepcopy(payload['prices']),message='Đã lưu bảng giá.')
+        elif action=='job.continue':result['job_id']='continued-temp'
         elif action=='telegram.broadcast': self.value['telegram']['broadcast_running']=True
         elif action=='telegram.cancel_broadcast': self.value['telegram']['broadcast_running']=False
         elif action=='batch.list': result['batches']=['paid_mail.json']

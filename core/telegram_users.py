@@ -16,6 +16,7 @@ from core.config.constants import MOCHI_INVITATION_REWARD_POINTS
 from core.finance import MailPurchaseReceipt, MAX_MONEY_UNITS
 from core.customer_accounts import CustomerAccountsMixin
 from core.job_statistics import JobStatisticsMixin
+from core.pricing import earned_units,price_snapshot
 from core.job_history import JOB_TIMEZONE, JobHistoryEntry
 from core.job_schedule import schedule_storage, schedule_time
 from core.mail.user_keys import validated_user_mail_keys
@@ -132,7 +133,7 @@ class TelegramUserStore(CustomerAccountsMixin, JobStatisticsMixin):
         COALESCE(SUM(j.requested_beans), 0) AS requested_beans,
         COALESCE(SUM(j.success_count), 0) AS success_count,
         COALESCE(SUM(CASE WHEN co.order_id IS NOT NULL THEN COALESCE(co.charged_units,0)
-            WHEN j.status='completed' THEN j.success_count * j.sale_rate_units ELSE 0 END), 0) AS revenue_units,
+            WHEN j.status='completed' THEN job_earned(j.success_count,j.target_count,j.sale_rate_units,j.schedule_data) ELSE 0 END), 0) AS revenue_units,
         COALESCE(MAX(e.cost_units), 0) AS cost_units,
         COALESCE(MAX(e.pending_costs), 0) AS pending_costs,
         COALESCE(SUM(CASE WHEN j.status='completed' AND j.finance_tracked=1 AND j.sale_rate_units IS NULL THEN 1 ELSE 0 END), 0) AS unpriced_jobs
@@ -262,6 +263,7 @@ class TelegramUserStore(CustomerAccountsMixin, JobStatisticsMixin):
     def _connection(self, *, write=False):
         connection = sqlite3.connect(str(self.path), timeout=15)
         connection.row_factory = sqlite3.Row
+        connection.create_function('job_earned',4,earned_units,deterministic=True)
         try:
             connection.execute('PRAGMA foreign_keys = ON')
             if write:
@@ -464,7 +466,7 @@ class TelegramUserStore(CustomerAccountsMixin, JobStatisticsMixin):
         if sale_rate_units is not None:
             sale_rate_units = _count(sale_rate_units, 'Đơn giá bán')
             expected = max(1, target_count, (requested_beans + 99) // 100)
-            if sale_rate_units > MAX_MONEY_UNITS // expected:
+            if price_snapshot(schedule_data) is None and sale_rate_units > MAX_MONEY_UNITS // expected:
                 raise ValueError('Giá trị đơn hàng vượt giới hạn lưu trữ.')
         stamp = _now()
         with self._connection(write=True) as connection:

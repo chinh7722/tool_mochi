@@ -449,8 +449,11 @@ class TelegramPage(QWidget):
         self._render_users()
 
     def _register_local_job(self, job_id, code, points, target_count, **schedule_options):
+        quote=self._price_quote(points)
+        from core.pricing import priced_metadata
+        schedule_options['schedule_data']=priced_metadata(schedule_options.get('schedule_data'),quote)
         created = self.store.record_local_job(job_id, code, points, target_count,
-            sale_rate_units=self._sale_rate_snapshot(), **schedule_options)
+            sale_rate_units=quote['rate_units'], **schedule_options)
         if created:
             try:
                 self._render_users()
@@ -489,7 +492,8 @@ class TelegramPage(QWidget):
                 jobs = self.store.list_jobs(owner_id)
                 table.setRowCount(len(jobs))
                 for row, job in enumerate(jobs):
-                    revenue = job['success_count'] * (job['sale_rate_units'] or 0) if job['status'] == 'completed' else 0
+                    from core.pricing import earned_units
+                    revenue = earned_units(job['success_count'],job['target_count'],job['sale_rate_units'],job['schedule_data']) if job['status'] == 'completed' else 0
                     incomplete = bool(job['pending_costs'] or (job['status'] == 'completed'
                         and job['finance_tracked'] and job['sale_rate_units'] is None))
                     label = self._job_status_text(job)
@@ -520,6 +524,11 @@ class TelegramPage(QWidget):
     def _sale_rate_snapshot(self):
         value = self.settings.value('finance/sale_rate_per_100', None)
         return None if value is None or str(value).strip() == '' else money_units(value)
+
+    def _price_quote(self,points):
+        from core.pricing import read_prices,quote_prices
+        prices=read_prices(self.settings)
+        return quote_prices(prices,points,None if prices else self._sale_rate_snapshot())
 
     def _save_finance_settings(self):
         try:
@@ -1104,10 +1113,11 @@ class TelegramPage(QWidget):
             reply('Yêu cầu đã có đơn '+order['order_id'] if order and previous.chat_id==request.chat_id
                 else 'Yêu cầu này đã được ghi nhận; chưa tạo thêm đơn.')
             return
-        rate = self._sale_rate_snapshot()
+        quote=self._price_quote(request.points)
+        rate = quote['rate_units']
         if rate is None or rate<=0:
             raise ValueError('Chưa cấu hình đơn giá bán. Liên hệ quản trị viên.')
-        required = required_mochi_invitation_accounts(request.points) * rate
+        required = quote['total_units']
         profile = self.store.get_customer(request.chat_id)
         balance = profile['balance_units']
         if balance < required:
@@ -1116,6 +1126,8 @@ class TelegramPage(QWidget):
         registration_errors = []
         def before_start(job_id,code,points,target_count,**schedule_options):
             try:
+                from core.pricing import priced_metadata
+                schedule_options['schedule_data']=priced_metadata(schedule_options.get('schedule_data'),quote)
                 created = self.store.record_customer_order(job_id,request.chat_id,code,points,target_count,
                     fingerprint,request.update_id,rate,**schedule_options)
             except Exception as exc:
@@ -1188,9 +1200,12 @@ class TelegramPage(QWidget):
         registered = []
 
         def before_start(job_id, code, points, target_count, **schedule_options):
+            quote=self._price_quote(points)
+            from core.pricing import priced_metadata
+            schedule_options['schedule_data']=priced_metadata(schedule_options.get('schedule_data'),quote)
             created = self.store.record_job(job_id, request.chat_id, code, points, target_count,
                 bot_fingerprint=fingerprint, update_id=request.update_id,
-                sale_rate_units=self._sale_rate_snapshot(), **schedule_options)
+                sale_rate_units=quote['rate_units'], **schedule_options)
             if created:
                 registered.append(job_id)
             return created

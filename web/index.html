@@ -22,6 +22,7 @@
     <button data-page="proxy"><span><img src="/icons/nav_proxy.svg" alt=""></span> Proxy Pool</button>
     <button data-page="mailproxy"><span><img src="/icons/nav_proxy.svg" alt=""></span> Proxy mua mail</button>
     <button data-page="telegram"><span><img src="/icons/nav_telegram.svg" alt=""></span> Telegram</button>
+    <button data-page="prices"><span><img src="/icons/nav_settings.svg" alt=""></span> Bảng giá</button>
     <button data-page="settings"><span><img src="/icons/nav_settings.svg" alt=""></span> Cài đặt chung</button>
   </nav>
   <div class="sidebar-bottom"><div class="pill" id="proxy-pill">○ Chưa có dữ liệu proxy</div><button class="connection" data-page="settings" id="sidebar-connection">○ Chưa kết nối VPS</button><p>Quản lý VPS · Web local</p></div>
@@ -40,7 +41,7 @@
       <div class="tabs workspace" data-tabs="mochi-workspace"><button data-tab="tasks" class="active">▣ Nhiệm vụ</button><button data-tab="inventory">▱ Kho tài khoản</button><button data-tab="lookup">⌕ Lấy mã mời</button></div>
       <div data-panel="mochi-workspace:tasks">
         <div class="page-heading"><h2>Jobs</h2><p>Tạo job nạp bean cho khách hàng và theo dõi tiến độ thực hiện.</p></div>
-        <div class="tabs wide" data-tabs="jobs"><button data-tab="setup" class="active">⚙ Thiết lập job</button><button data-tab="running">▷ Job đang chạy</button><button data-tab="logs">≡ Log job</button></div>
+        <div class="tabs wide" data-tabs="jobs"><button data-tab="setup" class="active">⚙ Thiết lập job</button><button data-tab="running">▷ Job đang chạy</button><button data-tab="logs">≡ Log job</button><button data-tab="temporary">↶ Lịch sử tạm</button></div>
         <div class="card" data-panel="jobs:setup"><h3>Thiết lập job</h3>
           <div class="grid two job-types"><div class="selected-type"><strong>Nhập mã mời để nạp bean</strong><p>Dùng mã mời khách để nạp bean từ tài khoản mới.</p></div><div class="disabled-type"><strong>Tạo account có sẵn bean</strong><p>Tạo tài khoản và tự nhận thưởng. · Chưa hỗ trợ</p></div></div>
           <form id="job-form">
@@ -54,11 +55,16 @@
         </div>
         <div class="card" data-panel="jobs:running" hidden><h3>DANH SÁCH NHIỆM VỤ TRONG PHIÊN</h3><p id="job-queue" class="muted">Chưa kết nối VPS.</p><div class="card-heading"><p class="hint" id="job-sync">Chưa có dữ liệu đồng bộ.</p><button data-action="refresh">↻ Đồng bộ VPS</button></div><div id="jobs-table"></div></div>
         <div class="card" data-panel="jobs:logs" hidden><div class="card-heading"><h3>NHẬT KÝ THỰC THI</h3><button data-action="reload-logs" data-mutation>Làm mới</button></div><p class="muted" id="log-caption">Chọn Log trên một job để xem nhật ký.</p><pre class="logs" id="job-log">Chưa chọn job.</pre></div>
+
+        <div class="card" data-panel="jobs:temporary" hidden><div class="card-heading"><h3>Lịch sử job tạm thời</h3><button id="temporary-clear" data-mutation>Xóa lịch sử tạm</button></div><p class="muted">Xóa ở đây chỉ ẩn danh sách hiện có. Job kết thúc sau đó sẽ xuất hiện. Lịch sử Thống kê và log luôn được giữ.</p><div id="temporary-table"></div><div class="actions"><button id="temporary-prev">Trang trước</button><span id="temporary-pagination"></span><button id="temporary-next">Trang sau</button><button id="temporary-refresh">Làm mới</button></div></div>
       </div>
       <div data-panel="mochi-workspace:inventory" hidden><div class="page-heading"><h2>Kho tài khoản</h2><p>Chọn lô mail đã mua cho job tiếp theo. Mail được giữ trên VPS.</p></div><div class="card"><h3>Dùng lô mail đã mua</h3><p class="muted">Chỉ xử lý mail chưa hoàn tất trong lô; không mua thêm khi chọn lô có sẵn.</p><label>Lô mail cho job<select id="job-batch"><option value="">Mua mail theo cấu hình VPS</option></select></label><div class="actions"><button data-action="upload-batch" data-mutation>↑ Chọn file JSON và đưa lên VPS</button><button data-action="batch-list" data-mutation>Làm mới danh sách lô</button><button data-action="new-job">Về thiết lập job</button></div><input type="file" id="batch-file" accept=".json,application/json" hidden></div></div>
       <div data-panel="mochi-workspace:lookup" hidden><div class="page-heading"><h2>Lấy mã mời tài khoản</h2><p>Đăng nhập Google để lấy mã mời Mochi, tên hiển thị và số dư beans hiện tại.</p></div><div class="card"><form id="lookup-form"><div class="grid two"><label>Email Google<input name="email" type="email" required autocomplete="off"></label><label>Mật khẩu Google<input name="password" type="password" required autocomplete="off"></label></div><div class="actions"><button class="primary" data-mutation type="submit" id="lookup-start">Đăng nhập &amp; lấy mã</button><button data-action="lookup-cancel" data-mutation type="button">Hủy</button><button data-page="settings" type="button">Cài đặt</button></div></form><p class="muted" id="lookup-status">Chưa kết nối VPS.</p></div><div class="card"><div class="card-heading"><h3>Danh sách tài khoản</h3><button data-action="profiles-export">↓ Xuất CSV</button></div><div id="profiles-table"></div></div></div>
     </section>
 
+
+
+    <section data-view="prices" id="prices-page" hidden><div class="page-heading"><h2>Bảng giá</h2><p>Giá được tính theo tỷ lệ mốc bean và chốt lúc tạo job.</p></div><div class="card"><p class="muted">Ví dụ 2.000 bean = 15.000 VND → 1.000 bean = 7.500 VND. Nếu có nhiều mốc: dùng mốc cao nhất không vượt số bean của job; thấp hơn mọi mốc thì dùng mốc nhỏ nhất. Bảng rỗng dùng đơn giá VND / 100 bean hiện tại.</p><form id="price-form"><div class="grid two"><label>Mốc bean<input id="price-beans" type="number" min="100" max="1000000" step="100" value="2000" required></label><label>Giá VND<input id="price-vnd" inputmode="decimal" placeholder="15000" required></label></div><button type="submit">Thêm / Cập nhật mốc</button></form></div><div class="card"><div id="prices-table"></div><div class="actions"><button class="primary" id="prices-save" data-mutation>Lưu bảng giá</button></div><p class="muted" id="prices-status">Bảng giá mới không thay đổi tiền đã chốt của job cũ.</p></div></section>
 
     <section data-view="statistics" id="statistics" hidden>
       <div class="page-heading"><h2>Thống kê</h2><p>Bấm vào mỗi cột để xem chi tiết theo ngày và theo người.</p></div>
@@ -66,11 +72,11 @@
       <div class="grid two stats-charts">
         <div class="card"><h3>Lợi nhuận đã xác định theo ngày (VND)</h3><div id="stats-profit"></div></div>
         <div class="card"><h3>Số job kết thúc theo ngày</h3><div id="stats-jobs"></div></div>
-        <div class="card"><h3>Lượt khách hàng theo ngày</h3><p id="stats-customers-summary" class="accent"></p><div id="stats-customers"></div></div>
-        <div class="card"><h3>Tỷ lệ lý do thất bại của các đợt chạy</h3><div id="stats-reasons"></div></div>
+        <div class="card"><h3>Lượt phục vụ theo ngày</h3><p id="stats-customers-summary" class="accent"></p><div id="stats-customers"></div></div>
+        <div class="card"><h3>Khách hàng theo ngày (mỗi mã mời = 1 khách)</h3><p class="muted">Cùng mã xuất hiện nhiều lần trong một ngày chỉ tính một khách hàng.</p><div id="stats-unique-customers"></div></div><div class="card stats-reasons-card"><h3>Tỷ lệ lý do thất bại của các đợt chạy</h3><div id="stats-reasons"></div></div>
       </div>
       <div class="card"><h3>Tổng theo người của ngày / tháng đã chọn</h3><div id="stats-users"></div></div>
-      <div class="card" id="stats-detail"><div class="card-heading"><h3 id="stats-detail-caption">Lịch sử job</h3><button data-action="history-export" data-mutation>↓ Xuất CSV lịch sử</button></div><div id="history-table"></div><div class="actions"><button id="stats-prev">Trang trước</button><span id="stats-pagination"></span><button id="stats-next">Trang sau</button></div></div>
+      <div class="card" id="stats-detail"><div class="card-heading"><h3 id="stats-detail-caption">Lịch sử job</h3><button data-action="history-export" data-mutation>↓ Xuất CSV lịch sử</button></div><label>Ngày xem<select id="stats-day"><option value="">Tất cả các ngày trong tháng</option></select></label><div id="history-table"></div><div class="actions"><button id="stats-prev">Trang trước</button><span id="stats-pagination"></span><button id="stats-next">Trang sau</button></div></div>
     </section>
 
     <section data-view="proxy" hidden><div id="proxy-account"></div></section>

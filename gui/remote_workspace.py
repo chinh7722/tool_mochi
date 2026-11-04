@@ -105,7 +105,7 @@ def build_mochi(window):
     window.job_tabs.setDrawBase(False)
     window.job_tabs.setExpanding(True)
     for label,image in (('Thiết lập job','user_add_blue.svg'),('Job đang chạy','pending_tasks_blue.svg'),
-                        ('Log job','log_document_blue.svg')):
+                        ('Log job','log_document_blue.svg'),('Lịch sử tạm','log_document_blue.svg')):
         window.job_tabs.addTab(icon('',image),label)
     jobs_box.addWidget(window.job_tabs)
     window.job_stack=QStackedWidget()
@@ -200,6 +200,10 @@ def build_mochi(window):
     window.logs=QPlainTextEdit();window.logs.setReadOnly(True);window.logs.setFont(QFont('Consolas',10))
     logs_box.addWidget(window.logs)
     window.job_stack.addWidget(logs)
+    from gui.remote_management_pages import TemporaryHistoryPanel
+    window.temporary_panel=TemporaryHistoryPanel(window)
+    window.job_stack.addWidget(window.temporary_panel)
+    window.job_tabs.currentChanged.connect(lambda index:window.temporary_panel.load() if index==3 else None)
     jobs_box.addWidget(window.job_stack,1)
     window.workspace_stack.addWidget(jobs)
     inventory=QWidget();inventory_box=QVBoxLayout(inventory);inventory_box.setContentsMargins(0,12,0,0)

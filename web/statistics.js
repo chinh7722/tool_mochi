@@ -3,10 +3,10 @@ export function installStatistics({$,app,api,esc,money,n,time,table,toast,idValu
   const colors=['#60a5fa','#34d399','#fbbf24','#fb7185','#a78bfa','#22d3ee','#f97316'];
   $('stats-month').value=new Intl.DateTimeFormat('sv-SE',{timeZone:'Asia/Ho_Chi_Minh',year:'numeric',month:'2-digit'}).format(new Date());
   const chart=(container,rows,field)=>{
-    const values=rows.map(r=>Number(r[field])), hi=Math.max(1,...values),lo=Math.min(0,...values),height=180,zero=hi/(hi-lo)*height;
+    const values=rows.map(r=>Number(r[field]||0)), hi=Math.max(1,...values),lo=Math.min(0,...values),height=180,zero=hi/(hi-lo)*height;
     $(container).innerHTML=`<svg viewBox="0 0 800 245" role="img" aria-label="Biểu đồ ${esc(field)} theo ngày"><line x1="50" y1="${35+zero}" x2="795" y2="${35+zero}" stroke="#64748b"/><text x="0" y="22" fill="#94a3b8" font-size="12">${esc(field==='profit_units'?money(String(Math.trunc(hi))):n(hi))}</text>${rows.map((r,i)=>{
-      const step=740/rows.length,x=50+i*step,v=Number(r[field]),y=35+zero-v/(hi-lo)*height;
-      return `<g role="button" tabindex="0" data-stats-day="${esc(r.day)}" data-stats-mode="${field==='customers'?'customers':'jobs'}" aria-label="${esc(r.day)}: ${esc(field==='profit_units'?money(r[field]):n(r[field]))}"><title>${esc(r.day)}: ${esc(field==='profit_units'?money(r[field])+' VND':n(r[field]))}${r.pending_jobs?' · Còn dữ liệu chờ đối soát':''}</title><rect x="${x}" y="30" width="${step}" height="200" fill="transparent"/><rect x="${x+2}" y="${Math.min(y,35+zero)}" width="${Math.max(2,step-4)}" height="${Math.max(2,Math.abs(y-35-zero))}" fill="${v<0?'#fb7185':'#60a5fa'}"/>${i%2===0?`<text x="${x+step/2}" y="240" text-anchor="middle" fill="#94a3b8" font-size="12">${r.day.slice(-2)}</text>`:''}</g>`;
+      const step=740/rows.length,x=50+i*step,v=Number(r[field]||0),y=35+zero-v/(hi-lo)*height;
+      return `<g role="button" tabindex="0" data-stats-day="${esc(r.day)}" data-stats-mode="${field==='unique_customers'?'codes':field==='customers'?'customers':'jobs'}" aria-label="${esc(r.day)}: ${esc(field==='profit_units'?money(r[field]):n(r[field]))}"><title>${esc(r.day)}: ${esc(field==='profit_units'?money(r[field])+' VND':n(r[field]))}${r.pending_jobs?' · Còn dữ liệu chờ đối soát':''}</title><rect x="${x}" y="30" width="${step}" height="200" fill="transparent"/><rect x="${x+2}" y="${Math.min(y,35+zero)}" width="${Math.max(2,step-4)}" height="${Math.max(2,Math.abs(y-35-zero))}" fill="${v<0?'#fb7185':'#60a5fa'}"/>${i%2===0?`<text x="${x+step/2}" y="240" text-anchor="middle" fill="#94a3b8" font-size="12">${r.day.slice(-2)}</text>`:''}</g>`;
     }).join('')}</svg>`;
   };
   function pie(rows) {
@@ -21,16 +21,18 @@ export function installStatistics({$,app,api,esc,money,n,time,table,toast,idValu
     const prior=$('stats-owner').value;
     $('stats-owner').innerHTML='<option value="">Tất cả mọi người</option>'+r.owners.map(o=>`<option value="${esc(o.chat_id)}">${esc(o.name)} (${esc(o.chat_id)})</option>`).join('');
     $('stats-owner').value=prior;
+    $('stats-day').innerHTML='<option value="">Tất cả các ngày trong tháng</option>'+r.days.map(d=>`<option value="${esc(d.day)}">${esc(d.day)}</option>`).join('');$('stats-day').value=day||'';
     $('stats-note').textContent=r.note;
     const c=r.customer_counts;
     $('stats-customers-summary').textContent=`Lượt khách: hôm nay ${n(c.today)} · tuần này ${n(c.week)} · tháng ${r.month}: ${n(c.month)}`;
-    chart('stats-profit',r.days,'profit_units');chart('stats-jobs',r.days,'jobs');chart('stats-customers',r.days,'customers');pie(r.reasons);
+    chart('stats-profit',r.days,'profit_units');chart('stats-jobs',r.days,'jobs');chart('stats-customers',r.days,'customers');chart('stats-unique-customers',r.days,'unique_customers');pie(r.reasons);
     table('stats-users',r.users,[['Người / Chat ID',p=>esc(p.name)+' ('+esc(p.chat_id)+')'],['Số job',p=>n(p.jobs)],['Doanh thu',p=>esc(money(p.revenue_units))],['Chi phí đã biết',p=>esc(money(p.cost_units))],['Lợi nhuận đã xác định',p=>esc(money(p.profit_units))],['Job chờ đối soát',p=>n(p.pending_jobs)]]);
-    const customers=mode==='customers',rows=customers?r.customer_history:r.history;
+    const customers=mode==='customers'||mode==='codes',rows=mode==='codes'?(r.code_history||[]):customers?r.customer_history:r.history;
     const body=[];
     const add=p=>body.push({...p,person:p.name+' ('+p.chat_id+')',beans:p.success_count*100,
       finished:p.finished_at||p.finalized_at});
-    if(customers) rows.forEach(add);
+    if(mode==='codes') rows.forEach(p=>body.push({person:p.owners.map(o=>o.name+' ('+o.chat_id+')').join(', '),code:p.code,status:p.runs+' lượt phục vụ',finished:p.day}));
+    else if(customers) rows.forEach(add);
     else for(const person of r.users) {
       rows.filter(p=>String(p.chat_id)===String(person.chat_id)).forEach(add);
       body.push({...person,person:'TỔNG '+person.name+' ('+person.chat_id+')',summary:true});
@@ -38,8 +40,8 @@ export function installStatistics({$,app,api,esc,money,n,time,table,toast,idValu
     table('history-table',body,[['Người / Chat ID','person'],['Mã job','job_id'],['Mã mời','code'],['Trạng thái','status'],['Bean','beans'],
       ['Doanh thu',p=>customers?'':esc(money(p.revenue_units))],['Chi phí đã biết',p=>customers?'':esc(money(p.cost_units))],
       ['Lợi nhuận',p=>customers?'':p.profit_units===null?'Chờ đối soát':esc(money(p.profit_units))],['Kết thúc',p=>esc(time(p.finished))]]);
-    total=customers?r.customer_total:r.total;
-    $('stats-detail-caption').textContent=(customers?'Danh sách mã mời / lượt khách':'Lịch sử job theo người')+' · '+(day||r.month);
+    total=mode==='codes'?r.code_total:customers?r.customer_total:r.total;
+    $('stats-detail-caption').textContent=(mode==='codes'?'Khách hàng theo mã mời duy nhất':customers?'Danh sách mã mời / lượt khách':'Lịch sử job theo người')+' · '+(day||r.month);
     $('stats-pagination').textContent=`${Math.min(offset+1,total)}–${Math.min(offset+100,total)} / ${total}`;
     $('stats-prev').disabled=offset===0;$('stats-next').disabled=offset+100>=total;
   }
@@ -55,6 +57,7 @@ export function installStatistics({$,app,api,esc,money,n,time,table,toast,idValu
   }
   $('stats-month').addEventListener('change',()=>{day=null;offset=0;load();});
   $('stats-owner').addEventListener('change',()=>{offset=0;load();});
+  $('stats-day').addEventListener('change',()=>{day=$('stats-day').value||null;mode='jobs';offset=0;load();});
   $('stats-refresh').addEventListener('click',load);
   $('stats-all-days').addEventListener('click',()=>{day=null;offset=0;mode='jobs';load();});
   $('stats-prev').addEventListener('click',()=>{offset=Math.max(0,offset-100);load();});

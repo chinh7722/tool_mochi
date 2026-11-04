@@ -3,6 +3,7 @@ import csv
 from datetime import datetime, timezone
 import io
 import json
+from core.pricing import earned_units,price_snapshot
 
 from core.job_schedule import VIETNAM_TIME
 
@@ -17,6 +18,7 @@ JOB_COLUMNS = (
     ('Lượt thành công', 'success_count'), ('Lượt lỗi', 'failure_count'), ('Bean thực tế', 'achieved_beans'),
     ('Trạng thái job', 'status'), ('Trạng thái điều phối', 'dispatch_state'),
     ('Đơn giá VND / 100 bean', 'sale_rate'), ('Doanh thu đã ghi nhận (VND)', 'revenue'),
+    ('Giá chốt theo bảng giá (VND)', 'quoted_total'),
     ('Chi phí mail đã xác định (VND)', 'known_cost'), ('Chi phí mail tổng (VND)', 'total_cost'),
     ('Giao dịch mail chờ đối soát', 'pending_costs'),
     ('Lợi nhuận đã xác định (VND)', 'profit'), ('Tình trạng tài chính', 'finance_state'),
@@ -100,7 +102,7 @@ def _job(owner, row):
     has_order = bool(row['customer_order_id'])
     unknown_rate = not has_order and row['status'] == 'completed' and rate is None
     revenue = (row['charged_units'] or 0) if has_order else (
-        None if unknown_rate else success * rate if row['status'] == 'completed' and rate is not None else 0)
+        None if unknown_rate else earned_units(success,row['target_count'],rate,row.get('schedule_data')) if row['status'] == 'completed' and rate is not None else 0)
     pending = row['pending_costs']
     incomplete_order = has_order and row['settled_at'] is None
     notes = []
@@ -125,7 +127,7 @@ def _job(owner, row):
         'success_count':success, 'failure_count':row['failure_count'], 'achieved_beans':success*100,
         'status':status, 'dispatch_state':{'running':'Đang xử lý', 'queued':'Đang chờ',
             'scheduled':'Hẹn giờ', 'dispatching':'Đang cấp chạy'}.get(row['dispatch_state'],row['dispatch_state']),
-        'sale_rate':_money(rate), 'revenue':_money(revenue), 'known_cost':_money(cost),
+        'sale_rate':_money(rate), 'quoted_total':_money(price_snapshot(row.get('schedule_data'))), 'revenue':_money(revenue), 'known_cost':_money(cost),
         'total_cost':_money(None if pending else cost),
         'pending_costs':pending, 'profit':_money(profit), 'finance_state':'; '.join(notes) or 'Đã xác định',
         'reserved':_money(row['reserved_units']), 'charged':_money(row['charged_units']),

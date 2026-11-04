@@ -402,6 +402,7 @@ class MochiChatPage(QWidget):
         self._session_jobs: Dict[str, _MochiJobSessionRecord] = {}
         self._job_logs: Dict[str, List[str]] = defaultdict(list)
         self._all_logs: List[str] = []
+        self.log_recorder=None
         self._selected_job_id: Optional[str] = None
         self._job_type: str = "CUSTOMER_INVITE"
         self.mail_purchase_recorder = None
@@ -2351,6 +2352,9 @@ class MochiChatPage(QWidget):
                 self._select_job(jid)
 
     def _append_log_line(self, text: str, color: str = "#f1f5f9", job_id: Optional[str] = None):
+        if job_id and self.log_recorder is not None:
+            try:self.log_recorder(job_id,text)
+            except Exception:logger.error('Không ghi được nhật ký job bền vững.')
         line_html = f"<span style='color: {color};'>{html.escape(text)}</span>"
         self._all_logs.append(line_html)
         if job_id:

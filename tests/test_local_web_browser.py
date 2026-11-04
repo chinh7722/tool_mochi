@@ -340,4 +340,58 @@ class LocalWebBrowserTests(unittest.IsolatedAsyncioTestCase):
         await self.page.screenshot(path=str(ROOT/'.tmp/statistics_web.png'),full_page=True)
 
 
+    async def test_price_milestone_save_and_ratio_quote_on_job_form(self):
+        await self.nav('prices')
+        await self.page.locator('#price-beans').fill('2000')
+        await self.page.locator('#price-vnd').fill('15000')
+        await self.page.locator('#price-form button[type="submit"]').click()
+        await self.page.locator('#prices-save').click()
+        payload=await self.sent('pricing.save')
+        self.assertEqual(payload['prices'],[dict(beans=2000,price_units=1500000)])
+        await self.nav('mochi')
+        await self.page.locator('#job-form [name="points"]').fill('1000')
+        self.assertEqual(await self.page.locator('#job-quote').input_value(),'7.500')
+        self.assertEqual(self.errors,[])
+
+    async def test_temporary_history_clear_confirmation_keeps_permanent_statistics_and_new_jobs_appear(self):
+        permanent=self.fixture.fake.value['history'].copy()
+        await self.page.locator('[data-tabs="jobs"] [data-tab="temporary"]').click()
+        await self.sent('history.temporary')
+        await self.page.locator('#temporary-table').filter(has_text='temp-failed').wait_for()
+        async def dismiss(dialog):await dialog.dismiss()
+        self.page.once('dialog',dismiss);await self.page.locator('#temporary-clear').click()
+        self.assertFalse(any(c[0]=='history.temporary.clear' for c in self.fixture.fake.commands))
+        async def accept(dialog):await dialog.accept()
+        self.page.once('dialog',accept);await self.page.locator('#temporary-clear').click()
+        await self.sent('history.temporary.clear')
+        await self.page.locator('#temporary-table .empty').wait_for()
+        self.assertEqual(self.fixture.fake.value['history'],permanent)
+        self.fixture.fake.temporary_rows=[dict(job_id='after-clear',code='NEW',name='New user',chat_id=202,status='completed',target_count=1,success_count=1,can_continue=False,finalized_at='2026-11-04T10:00:00+07:00')]
+        await self.page.locator('#temporary-refresh').click()
+        await self.page.locator('#temporary-table').filter(has_text='after-clear').wait_for()
+        self.assertEqual(self.errors,[])
+
+    async def test_unique_customer_chart_and_explicit_all_days_selector(self):
+        await self.nav('statistics');await self.sent('statistics.get')
+        await self.page.locator('#stats-unique-customers [data-stats-day]').nth(3).click()
+        await self.sent('statistics.get',2)
+        await self.page.locator('#stats-detail-caption').filter(has_text='mã mời duy nhất').wait_for()
+        self.assertIn('ONECODE',await self.page.locator('#history-table').text_content())
+        self.assertEqual(await self.page.locator('#stats-day').input_value(),(await self.page.locator('#stats-month').input_value())+'-04')
+        await self.page.locator('#stats-day').select_option('')
+        payload=await self.sent('statistics.get',3)
+        self.assertNotIn('day',payload)
+        await self.page.locator('#stats-detail-caption').filter(has_text='Lịch sử job').wait_for()
+        self.assertEqual(self.errors,[])
+        await self.page.screenshot(path=str(ROOT/'.tmp/unique_customers_web.png'),full_page=True)
+
+    async def test_temporary_failed_job_can_continue_and_view_its_log(self):
+        await self.page.locator('[data-tabs="jobs"] [data-tab="temporary"]').click();await self.sent('history.temporary')
+        await self.page.locator('#temporary-table [data-action="job-logs"]').click()
+        payload=await self.sent('job.logs');self.assertEqual(payload['job_id'],'temp-failed')
+        await self.page.locator('[data-tabs="jobs"] [data-tab="temporary"]').click()
+        await self.page.locator('#temporary-table [data-action="job-continue"]').click()
+        payload=await self.sent('job.continue');self.assertEqual(payload['job_id'],'temp-failed')
+
+
 if __name__=='__main__': unittest.main()

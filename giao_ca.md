@@ -780,3 +780,41 @@ Quy trình phát triển và hoàn thiện công cụ trải qua 8 vòng lặp (
   có nhóm lỗi; kiểm tra lại ledger13 sau khi phân biệt quota job thường (lỗi)
   với đợt combo chờ quota (không phải lỗi) cũng PASS.
 
+### Bảng giá theo mốc, lịch sử tạm và log combo bền vững — 04/11/2026
+
+- Người dùng chọn tính giá **theo tỷ lệ mốc bean**. `core/pricing.py` chọn mốc
+  lớn nhất không vượt bean tính tiền (thấp hơn mọi mốc dùng mốc nhỏ nhất),
+  tính tổng bằng số nguyên, làm tròn một lần đến0,01VND. Bảng rỗng dùng đơn giá
+  /100bean cũ. Tab Bảng giá trên tool/web có thêm/sửa/xóa mốc, lưu rõ ràng trên VPS.
+- Giá chốt trong `schedule_data`, không đổi các job đã tạo khi bảng giá thay đổi.
+  SQL aggregate, báo cáo CSV, thống kê và chốt ví cùng dùng `earned_units` để
+  tránh sai số khi giá không chia hết số lượt. Job con tiếp tục giữ đúng phần
+  giá còn thiếu; tiền đã thu + giữ phần còn lại bằng giá gốc. CSV thêm giá chốt.
+- Bổ sung biểu đồ **Khách hàng theo ngày = số mã mời duy nhất** của những
+  job/đợt kết thúc trong ngày; gộp mã không phân biệt hoa/thường và chủ sở hữu.
+  Biểu đồ lượt phục vụ cũ giữ riêng. Bấm cột có danh sách mã/người/số lượt;
+  lịch sử Thống kê có ô Ngày xem → Tất cả các ngày trong tháng, vẫn lọc người.
+- `history.temporary` phân trang100, thêm tab Lịch sử tạm tại Mochi ở cả hai
+  giao diện, có Log/Tiếp tục từng job thất bại. `history.temporary.clear` chỉ
+  thêm dấu ẩn cho các job đã kết thúc; không DELETE jobs/job_runs/CSV/tiền/log.
+  Clear có xác nhận; replay UUID không ẩn nhầm job kết thúc sau lần clear đầu.
+  Job kết thúc sau clear tiếp tục xuất hiện. Lịch sử Thống kê không có chức năng xóa.
+- Nguyên nhân mất log cũ là `_job_logs` chỉ giữ trong RAM. `core/job_log_store.py`
+  lưu từng dòng vào SQLite riêng (WAL), cursor/epoch bền qua restart; mọi đợt
+  combo dùng cùng job ID. API phân trang từ dòng đầu rồi nối dòng mới, không
+  chỉ lấy1000 dòng cuối. Clear lịch sử tạm không tác động log.
+- Rollout giữ lại log RAM qua API ngay trên VPS trước khi stop; phục hồi thêm
+  warning/error từ journald của các phiên dịch vụ cũ nếu còn. Payload không
+  được in hoặc đưa về máy quản lý. Không thể dựng lại INFO/log chưa từng lưu.
+  Sau pull, ghi kho log và chown/chmod cho user dịch vụ trước khi start.
+- Windows full1028 ca PASS, thêm ca đơn bot theo mốc qua controller (combo16)
+  PASS:1029 ca riêng biệt. Có16 ca mới về tiền chính xác/giữ ví/mã duy nhất/
+  clear không phá thống kê/replay/log qua restart, Chromium27 và HTTP/Qt12.
+  Preview `.tmp/pricing_tool.png`, `temporary_history_tool.png`,
+  `unique_customers_web.png`; root/src đồng bộ. Không mua mail/gửi bot/thu tiền thật.
+  Hướng dẫn `BANG_GIA_LICH_SU_TAM_VA_LOG_2026-11-04.md`.
+  Ubuntu full1028 ca PASS; bộ chốt combo16 (bao gồm đơn bot theo bảng giá),
+  pricing/history/log16 và HTTP/Qt12 đều PASS sau cập nhật cuối. Tổng1029 ca
+  riêng biệt đã qua trên cả hai nền tảng. Xác minh lại bốn luồng web mới và
+  ảnh1120×760; nút từng dòng dùng cỡ nhỏ để không cắt chữ.
+

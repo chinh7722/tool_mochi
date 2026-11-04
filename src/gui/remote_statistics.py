@@ -33,7 +33,7 @@ class DailyChart(QWidget):
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
         p.setPen(QColor('#e2e8f0'))
         p.drawText(12,22,self.title)
-        values = [r[self.field] for r in self.rows]
+        values = [r.get(self.field,0) for r in self.rows]
         hi,lo = max([1]+values),min([0]+values)
         left,top,width,height = 58,48,max(1,self.width()-72),self.height()-84
         zero = top+height*hi/(hi-lo)
@@ -46,9 +46,10 @@ class DailyChart(QWidget):
         for index,r in enumerate(self.rows):
             step=width/max(1,len(self.rows))
             x=left+index*step
-            y=zero-height*r[self.field]/(hi-lo)
+            value=r.get(self.field,0)
+            y=zero-height*value/(hi-lo)
             rect=QRectF(x+1,min(y,zero),max(2,step-3),max(2,abs(zero-y)))
-            p.fillRect(rect,QColor('#fb7185' if r[self.field]<0 else '#60a5fa'))
+            p.fillRect(rect,QColor('#fb7185' if value<0 else '#60a5fa'))
             self.regions.append((QRectF(x,top,step,height+24),r))
             p.setPen(QColor('#94a3b8'))
             if index%2==0:
@@ -58,7 +59,7 @@ class DailyChart(QWidget):
     def mouseMoveEvent(self,event):
         for rect,row in self.regions:
             if rect.contains(event.position()):
-                value=money(row[self.field])+' VND' if self.field=='profit_units' else str(row[self.field])
+                value=money(row.get(self.field,0))+' VND' if self.field=='profit_units' else str(row.get(self.field,0))
                 self.setToolTip(row['day']+': '+value+(' · Còn dữ liệu chờ đối soát' if row.get('pending_jobs') else ''))
                 return
 
@@ -120,17 +121,20 @@ class StatisticsPanel(QWidget):
         overview=QWidget();body=QVBoxLayout(overview)
         self.customer_counts=QLabel();body.addWidget(self.customer_counts)
         grid=QGridLayout();self.charts={}
-        for i,(field,label) in enumerate((('profit_units','Lợi nhuận đã xác định / ngày (VND)'),('jobs','Số job kết thúc / ngày'),('customers','Lượt khách hàng / ngày'))):
+        for i,(field,label) in enumerate((('profit_units','Lợi nhuận đã xác định / ngày (VND)'),('jobs','Số job kết thúc / ngày'),('customers','Lượt phục vụ / ngày'),('unique_customers','Khách hàng / ngày (mã mời duy nhất)'))):
             chart=DailyChart(field,label)
             chart.clicked.connect(lambda day,f=field:self.select_day(day,f))
             grid.addWidget(chart,i//2,i%2);self.charts[field]=chart
-        self.pie=ReasonChart();grid.addWidget(self.pie,1,1);body.addLayout(grid)
+        self.pie=ReasonChart();grid.addWidget(self.pie,2,0,1,2);body.addLayout(grid)
         self.summary=table(['Người / Chat ID','Số job','Doanh thu (VND)','Chi phí đã biết (VND)','Lợi nhuận đã xác định (VND)','Chờ đối soát'])
         self.summary.setMinimumHeight(155);body.addWidget(self.summary)
         scroll=QScrollArea();scroll.setWidgetResizable(True);scroll.setWidget(overview)
         self.tabs.addTab(scroll,'Biểu đồ')
         detail=QWidget();details=QVBoxLayout(detail)
         self.caption=QLabel('Lịch sử job theo tháng / người');details.addWidget(self.caption)
+        day_row=QHBoxLayout();day_row.addWidget(QLabel('Ngày xem:'))
+        self.day_filter=QComboBox();self.day_filter.addItem('Tất cả các ngày trong tháng',None)
+        day_row.addWidget(self.day_filter,1);details.addLayout(day_row)
         self.history=table(['Người / Chat ID','Mã job','Mã mời','Trạng thái','Bean','Doanh thu','Chi phí','Lợi nhuận','Kết thúc'])
         details.addWidget(self.history)
         actions=QHBoxLayout()
@@ -143,6 +147,10 @@ class StatisticsPanel(QWidget):
         window.history=self.history
         self.month.dateChanged.connect(self.reset)
         self.owner.currentIndexChanged.connect(self.reset_owner)
+        self.day_filter.currentIndexChanged.connect(self.change_day)
+
+    def change_day(self,*_):
+        self.day=self.day_filter.currentData();self.offset=0;self.mode='jobs';self.load()
 
     def turn(self,direction):
         new=self.offset+direction*100
@@ -158,7 +166,7 @@ class StatisticsPanel(QWidget):
         self.day=None;self.offset=0;self.mode='jobs';self.load()
 
     def select_day(self,day,field):
-        self.day=day;self.offset=0;self.mode='customers' if field=='customers' else 'jobs'
+        self.day=day;self.offset=0;self.mode='codes' if field=='unique_customers' else 'customers' if field=='customers' else 'jobs'
         self.tabs.setCurrentIndex(1);self.load()
 
     def load(self,*_):
@@ -179,6 +187,9 @@ class StatisticsPanel(QWidget):
     def render(self,result):
         from gui.remote_window import fill
         self.note.setText(result['note'])
+        self.day_filter.blockSignals(True);self.day_filter.clear();self.day_filter.addItem('Tất cả các ngày trong tháng',None)
+        for d in result['days']:self.day_filter.addItem(d['day'],d['day'])
+        self.day_filter.setCurrentIndex(max(0,self.day_filter.findData(self.day)));self.day_filter.blockSignals(False)
         old=self.owner.currentData();self.owner.blockSignals(True);self.owner.clear();self.owner.addItem('Tất cả mọi người',None)
         for owner in result['owners']:self.owner.addItem(f"{owner['name']} ({owner['chat_id']})",owner['chat_id'])
         self.owner.setCurrentIndex(max(0,self.owner.findData(old)));self.owner.blockSignals(False)
@@ -188,6 +199,14 @@ class StatisticsPanel(QWidget):
         groups=[dict(person=f"{r['name']} ({r['chat_id']})",jobs=r['jobs'],revenue=money(r['revenue_units']),
             cost=money(r['cost_units']),profit=money(r['profit_units']),pending=r['pending_jobs']) for r in result['users']]
         fill(self.summary,groups,['person','jobs','revenue','cost','profit','pending'])
+        if self.mode=='codes':
+            rows=[dict(person=', '.join(f"{o['name']} ({o['chat_id']})" for o in r['owners']),code=r['code'],
+                status=f"{r['runs']} lượt phục vụ",finished=r['day']) for r in result.get('code_history',[])]
+            fill(self.history,rows,['person','job_id','code','status','beans','revenue','cost','profit','finished'])
+            self.total=result.get('code_total',0)
+            self.caption.setText('Khách hàng theo mã mời duy nhất · '+(self.day or result['month']))
+            self.page_label.setText(f'{min(self.offset+1,self.total)}–{min(self.offset+100,self.total)} / {self.total}')
+            return
         customers=self.mode=='customers'
         source=result['customer_history'] if customers else result['history']
         rows=[]

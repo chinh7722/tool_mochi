@@ -1,5 +1,11 @@
 # hoshino-tool — Mochi Chat, Proxy Pool & Telegram
 
+> **[Bảng giá, lịch sử tạm và log combo](BANG_GIA_LICH_SU_TAM_VA_LOG_2026-11-04.md):**
+> thêm giá theo mốc bean, tính theo tỷ lệ và chốt giá khi tạo job; biểu đồ khách
+> hàng đếm mã mời duy nhất mỗi ngày. Mochi có lịch sử tạm, Log/Tiếp tục và xóa có
+> xác nhận; lịch sử Thống kê luôn giữ nguyên. Log được lưu qua restart; lịch sử
+> Thống kê có lựa chọn tất cả các ngày trong tháng.
+
 > **[Thống kê và tiếp tục job](THONG_KE_VA_TIEP_TUC_JOB_2026-11-04.md):** tab
 > Thống kê có biểu đồ lợi nhuận, số job, lượt khách theo ngày và tỷ lệ lý do lỗi;
 > bấm cột để xem theo người. Lịch sử chuyển sang đây, có lọc từng người/tất cả.

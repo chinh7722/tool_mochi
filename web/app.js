@@ -1,4 +1,5 @@
 import {installStatistics} from './statistics.js';
+import {installManagement,quotedUnits} from './management.js';
 const $ = id => document.getElementById(id);
 const app = {state: null, csrf: '', connected: false, busy: false, polling: false, needPoll: false,
   generation: 0, loaded: false, page: 'mochi', logJob: '', focusJob: '', selected: {}, recipients: new Set(),
@@ -131,6 +132,7 @@ function render() {
   $('settings-status').textContent=`API GmailVip: ${s.settings.has_gmailvip_key?'đã lưu':'chưa có'} · API 1TrieuMail: ${s.settings.has_one_trieu_key?'đã lưu':'chưa có'}`;
   if(!app.loaded) {loadSettings(); app.loaded=true;}
   controls();
+  management.refreshPrices();
 }
 function loadSettings() {
   if(!app.state) return;
@@ -142,7 +144,8 @@ function loadSettings() {
 }
 function quote() {
   const points=Number(field('job-form','points').value || 0), count=Math.ceil(points/100), rate=Number(app.state?.settings?.sale_rate);
-  $('job-accounts').textContent=`(= ${n(count)} accounts)`; $('job-quote').value=rate>0?n(rate*count):'';
+  $('job-accounts').textContent=`(= ${n(count)} accounts)`;
+  try {const value=quotedUnits(points,app.state?.settings);$('job-quote').value=value===null?'':money(String(value));}catch{$('job-quote').value='';}
   const combo=field('job-form','combo').checked, scheduled=field('job-form','scheduled').checked;
   $('job-start').textContent=scheduled?(combo?'Tạo lịch combo':'Tạo lịch job'):(combo?'Bắt đầu combo':'Bắt đầu nhập mã');
   field('job-form','scheduled_at').disabled=!scheduled;
@@ -181,6 +184,7 @@ async function pollLogs() {
     if(r.reset)view.textContent='';const lines=r.lines||[];
     if(lines.length)view.textContent+=(view.textContent?'\n':'')+lines.join('\n');
     logCursor=r.cursor??null;logEpoch=r.epoch??null;if(atEnd)view.scrollTop=view.scrollHeight;
+    $('log-caption').textContent='Job: '+jobId+(r.has_more?' · Đang tải log đã lưu…':' · Tự cập nhật mỗi giây');
   } catch(error){$('log-caption').textContent='Job: '+jobId+' · '+error.message;}
   finally {logBusy=false;}
 }
@@ -189,7 +193,7 @@ function saveDraft() {const f=$('job-form'); localStorage.setItem('hoshino.jobDr
 
 document.addEventListener('click',async event=>{
   const nav=event.target.closest('[data-page]'); if(nav) {event.preventDefault(); page(nav.dataset.page); return;}
-  const tabs=event.target.closest('[data-tab]'); if(tabs) {tab(tabs.closest('[data-tabs]').dataset.tabs,tabs.dataset.tab); if(tabs.dataset.tab==='inventory'&&app.connected) batches(); if(tabs.dataset.tab==='running') poll(); return;}
+  const tabs=event.target.closest('[data-tab]'); if(tabs) {tab(tabs.closest('[data-tabs]').dataset.tabs,tabs.dataset.tab); if(tabs.dataset.tab==='inventory'&&app.connected) batches(); if(tabs.dataset.tab==='running') poll();if(tabs.dataset.tab==='temporary')management.loadTemporary(); return;}
   const b=event.target.closest('[data-action]');
   if(b) {event.preventDefault(); if(b.disabled) return; const id=b.dataset.id, pool=b.dataset.pool;
     try {switch(b.dataset.action) {
@@ -273,5 +277,6 @@ try {const draft=JSON.parse(localStorage.getItem('hoshino.jobDraft') || '{}'); f
 $('local-address').textContent=location.host; controls();
 async function boot() {try {const bootstrap=new URLSearchParams(location.hash.slice(1)).get('session'); if(bootstrap) {await api('/api/session',{}, {'X-Web-Bootstrap':bootstrap}); history.replaceState(null,'',location.pathname);} const config=await api('/api/config'); app.csrf=config.csrf; field('connection-form','url').value=config.url; $('connection-config').textContent=config.has_token?'Đã có token lưu trên máy; để trống để dùng lại.':'Chưa có token. Nhập token quản lý VPS tại đây.'; await poll(); setInterval(poll,2500);} catch(error) {status(error.message); toast(error.message,true);}}
 const statistics=installStatistics({$,app,api,esc,money,n,time,table,toast,idValue});
+const management=installManagement({$,app,api,command,esc,money,n,time,table,toast,controls,logs});
 setInterval(pollLogs,1000);
 boot();
