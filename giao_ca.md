@@ -759,7 +759,7 @@ Quy trình phát triển và hoàn thiện công cụ trải qua 8 vòng lặp (
   xem, không lặp dòng; đổi runtime thì reset. Đang đọc dòng cũ không ép cuộn cuối.
 - Runner mua bù đúng lượt tài khoản lỗi, tận dụng mail dư đã trả trước khi mua
   thêm; lỗi mail thử chỉ thử từng mail đến khi mã được xác nhận. Dừng ở3 lỗi liên
-  tiếp hoặc5 lỗi tổng mỗi đợt; thành công xóa streak, tài khoản đã nhập mã tính
+  tiếp hoặc5 lỗi tổng cả job; thành công xóa streak, tài khoản đã nhập mã tính
   vào tổng lỗi. Mã sai/quota/lỗi bộ đếm/giao dịch shop chưa rõ vẫn dừng ngay theo
   chính sách. Lô chỉ định có sẵn không tự mua thêm; shop trả thiếu không tự bù
   phần chưa giao. Mọi mail mua thêm lưu lô và ghi chi phí vào đúng owner/job.
@@ -774,4 +774,9 @@ Quy trình phát triển và hoàn thiện công cụ trải qua 8 vòng lặp (
   thống kê13, HTTP/Qt9 và desktop16 đều PASS; tổng1002 ca riêng biệt qua trên Ubuntu.
   Khi rollout cần sao lưu trước migration, không restart lúc đang có job/
   thông báo đang gửi, giữ trạng thái bot/SePay và đối chiếu lịch combo.
+  Bổ sung giữ tổng lỗi qua các ngày/restart combo, không reset ngưỡng5 theo đợt;
+  truyền ngân sách lỗi còn lại vào runner, chặn trước mua khi đã đủ5.
+  Bản chốt đã qua full regression **1005/1005 trên Windows và Ubuntu**, không
+  có nhóm lỗi; kiểm tra lại ledger13 sau khi phân biệt quota job thường (lỗi)
+  với đợt combo chờ quota (không phải lỗi) cũng PASS.
 

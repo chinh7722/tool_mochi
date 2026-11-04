@@ -57,6 +57,11 @@ và số dư được chuyển chính xác giữa web và API.
 
 ## Đóng và kết nối lại
 
+Mục **Thống kê** trên thanh bên có các biểu đồ theo tháng, bấm cột để xem chi
+tiết theo ngày và người. Lịch sử job đã chuyển vào đây, có bộ lọc người/tất cả.
+Nút **Tiếp tục** ở từng job tạo phần bean còn thiếu; **Dừng** hỏi xác nhận.
+Log tự nối dòng mới mỗi giây. Xem [hướng dẫn mới](../THONG_KE_VA_TIEP_TUC_JOB_2026-11-04.md).
+
 Đóng trình duyệt, dừng web local hoặc mất tunnel vẫn để job, lịch combo, bot và
 SePay tiếp tục chạy trên VPS. Chỉ các nút **Dừng job**, **Tắt bot**, **Dừng gửi**
 hoặc **Tắt đồng bộ** mới gửi lệnh tương ứng đến VPS.

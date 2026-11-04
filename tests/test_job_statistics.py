@@ -79,10 +79,13 @@ class StatisticsTests(unittest.TestCase):
 
     def test_reasons_percent_denominator_excludes_cancel_and_combo_quota(self):
         self.job('failed',status='failed');self.job('cancel',status='cancelled')
-        self.store.record_job('combo',100,'CODE',2000,20)
+        self.store.record_job('combo',100,'CODE',2000,20,schedule_data={'combo':True})
         self.store.record_job_run('combo','r','invite_limit_reached',10,10,finished_at='2026-11-04T09:00:00+07:00')
+        self.store.record_job('normal-quota',100,'CODE',100,1)
+        self.store.record_job_run('normal-quota','r','invite_limit_reached',0,0,finished_at='2026-11-04T09:00:00+07:00')
         report=self.store.statistics('2026-11')
-        self.assertEqual(sum(r['count'] for r in report['reasons']),1)
+        self.assertEqual(sum(r['count'] for r in report['reasons']),2)
+        self.assertIn('Mã mời đã đạt giới hạn 24 giờ.',[r['reason'] for r in report['reasons']])
 
     def test_continuation_copies_owner_rate_and_only_missing_target_without_mutating_source(self):
         self.job('failed',owner=200,status='failed',success=2)

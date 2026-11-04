@@ -123,10 +123,10 @@ class ComboLifecycleTests(unittest.TestCase):
         for index, successes in enumerate((10, 10, 10, 10, 10, 5)):
             self.dispatch(job)
             self.assertEqual(self.mochi._workers[job].initial_success_count, index * 10)
-            self.finish_round(job, successes, 2, 'completed' if index == 5 else 'invite_limit_reached')
+            self.finish_round(job, successes, 1 if index<4 else 0, 'completed' if index == 5 else 'invite_limit_reached')
             row = self.store.get_job(job)
             self.assertEqual((row.success_count, row.attempted_count, row.failure_count),
-                (min(55, (index + 1) * 10), min(55, (index + 1) * 10) + (index + 1) * 2, (index + 1) * 2))
+                (min(55, (index + 1) * 10), min(55, (index + 1) * 10) + min(index+1,4), min(index+1,4)))
             if index < 5:
                 self.assertIsNone(row.finalized_at)
                 self.assertEqual(row.dispatch_state, 'scheduled')
@@ -137,7 +137,7 @@ class ComboLifecycleTests(unittest.TestCase):
         self.assertEqual(self.started, [job] * 6)
         self.assertEqual(len(waiting), 5)
         self.assertEqual(len(finished), 1)
-        self.assertEqual((finished[0].success_count, finished[0].attempted_count, finished[0].failure_count), (55, 67, 12))
+        self.assertEqual((finished[0].success_count, finished[0].attempted_count, finished[0].failure_count), (55, 59, 4))
         self.assertEqual(self.store.get_job(job).status, 'completed')
         self.assertEqual(len(self.store.list_jobs(-1)), 1)
         self.assertEqual(len(self.mochi.job_history_store.read()), 1)
@@ -242,6 +242,7 @@ class ComboLifecycleTests(unittest.TestCase):
         recovered._check_scheduled_jobs(Clock.current)
         self.assertEqual(self.started, [job, job])
         self.assertEqual(recovered._workers[job].initial_success_count, 10)
+        self.assertEqual(recovered._workers[job].runner.failure_budget_used,2)
 
     def test_graceful_shutdown_saves_interrupted_round_without_settling_hold(self):
         job = self.customer()
@@ -320,6 +321,17 @@ class ComboLifecycleTests(unittest.TestCase):
                 self.assertIn(jid,self.mochi._scheduled_jobs)
         with self.store._connection() as db:
             self.assertEqual(db.execute('SELECT COUNT(*) FROM job_runs WHERE job_id=?',(jid,)).fetchone()[0],2)
+
+    def test_next_combo_round_and_restart_keep_total_failure_budget(self):
+        jid=self.create();self.dispatch(jid);self.finish_round(jid,10,2);self.release(jid)
+        self.dispatch(jid)
+        self.assertEqual(self.mochi._workers[jid].runner.failure_budget_used,2)
+        self.finish_round(jid,10,2);self.release(jid)
+        self.mochi._closing_jobs=True;self.page.worker=None
+        recovered,page=self.open_pages()
+        Clock.current=schedule_time(page.store.get_job(jid).scheduled_at)+timedelta(seconds=1)
+        recovered._check_scheduled_jobs(Clock.current)
+        self.assertEqual(recovered._workers[jid].runner.failure_budget_used,4)
 
 
 if __name__ == '__main__':

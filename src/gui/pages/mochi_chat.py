@@ -1583,6 +1583,12 @@ class MochiChatPage(QWidget):
                 QTimer.singleShot(0, lambda: self._on_job_finished(MochiInviteJobSummary(
                     job_id,code,target_accs,0,_scheduled_record.success_count,0,0,'completed',())))
                 return job_id
+            if _scheduled_record.combo and _scheduled_record.failure_count>=5:
+                job_id=_scheduled_record.job_id
+                QTimer.singleShot(0,lambda:self._on_job_finished(MochiInviteJobSummary(
+                    job_id,code,target_accs,0,_scheduled_record.success_count,0,0,'failed',(),
+                    'Đạt giới hạn tổng 5 lỗi trong job.')))
+                return job_id
         try:
             quota=self._invite_quota_snapshot(code)
         except Exception:
@@ -1768,6 +1774,7 @@ class MochiChatPage(QWidget):
             mail_purchase_sink=self._record_mail_purchase if self.mail_purchase_recorder is not None else None,
             mail_proxy_pool=mail_proxy_pool,
             invite_quota_store=self.invite_quota_store,
+            failure_budget_used=record.failure_count if record.combo else 0,
         )
         if mail_proxy_pool is not None:
             mail_proxy_pool.on_wait=lambda message:runner._emit_log(job_id,message)
@@ -2161,6 +2168,8 @@ class MochiChatPage(QWidget):
             record.success_count = max(record.success_count,summary.success_count)
             record.failure_count = max(record.failure_count,summary.failure_count)
             record.attempted_count = max(record.attempted_count,summary.attempted_count)
+            if record.failure_count>=5 and summary.status not in ('completed','cancelled'):
+                summary=replace(summary,status='failed',error_message='Đạt giới hạn tổng 5 lỗi trong job.')
             if self.job_run_recorder is not None:
                 from core.job_failure import job_failure_reason
                 try:

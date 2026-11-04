@@ -24,8 +24,8 @@
 - Nếu mail thử mã đầu tiên lỗi đăng nhập/kết nối, chỉ mua lại một mail thử.
   Sau khi thử mã thành công mới mua phần mục tiêu còn lại.
 - Dừng và đưa job vào thất bại khi có **3 lượt lỗi liên tiếp** hoặc **5 lượt
-  lỗi tổng cộng trong một đợt chạy**. Một lượt thành công xóa bộ đếm lỗi liên
-  tiếp; tổng lỗi không bị xóa. Combo đặt lại bộ đếm cho đợt chạy kế tiếp.
+  lỗi tổng cộng trong toàn bộ job**. Một lượt thành công xóa bộ đếm lỗi liên
+  tiếp; tổng lỗi không bị xóa. Combo giữ tổng lỗi qua các ngày và khi VPS khởi động lại.
 - Tài khoản đã nhập mã trước đó cũng là lượt xử lý không đạt, được tính vào
   ngưỡng trên. Khi đạt ngưỡng, không cấp thêm tác vụ và hủy các tác vụ còn chờ;
   các lượt đã hoàn tất giữ tiến độ và chi phí thực tế.

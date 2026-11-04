@@ -76,8 +76,8 @@ def _reason(message='',status=''):
         return 'Job dừng sau 10 lần xử lý không thành công liên tiếp.'
     if has('3 loi lien tiep'):
         return 'Job dừng sau 3 lượt xử lý lỗi liên tiếp.'
-    if has('5 loi trong dot chay'):
-        return 'Job dừng khi đạt tổng 5 lượt xử lý lỗi trong đợt chạy.'
+    if has('5 loi trong dot chay','5 loi trong job'):
+        return 'Job dừng khi đạt tổng 5 lượt xử lý lỗi trong job.'
     if has('database is locked','database disk image','sqlite','khong luu duoc chu so huu','khong doc duoc lich su'):
         return 'Không đọc/ghi được dữ liệu job trong tool; cần kiểm tra file dữ liệu.'
     if has('no space left','disk full','het dung luong'):

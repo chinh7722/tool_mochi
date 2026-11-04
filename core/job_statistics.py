@@ -132,7 +132,7 @@ class JobStatisticsMixin:
             db.execute('BEGIN')
             jobs = self._statistics_rows(db)
             runs = [dict(r) for r in db.execute('''SELECT r.job_id,j.chat_id,u.name,j.code,
-                r.finished_at,r.status,r.reason,r.success_count FROM job_runs r
+                r.finished_at,r.status,r.reason,r.success_count,j.schedule_data AS _configuration FROM job_runs r
                 JOIN jobs j USING(job_id) JOIN users u USING(chat_id) ORDER BY r.finished_at DESC''')]
             owners = [dict(r) for r in db.execute('SELECT chat_id,name FROM users ORDER BY name,chat_id')]
         monthly = [r for r in jobs if r['day'] in days]
@@ -152,13 +152,20 @@ class JobStatisticsMixin:
         counts = dict(today=0,week=0,month=0)
         selected_runs = []
         for r in runs:
+            try:
+                config=json.loads(r.pop('_configuration'))
+                combo=isinstance(config,dict) and config.get('combo') is True
+            except (TypeError,ValueError):
+                combo=False
             r['day'] = day_of(r['finished_at'])
             if r['day']==today.isoformat(): counts['today'] += 1
             if week_start.isoformat() <= r['day'] <= today.isoformat(): counts['week'] += 1
             if r['day'] in days:
                 counts['month'] += 1
                 daily[r['day']]['customers'] += 1
-                if r['status'] not in ('completed','cancelled','invite_limit_reached'):
+                if r['status']=='invite_limit_reached' and not combo:
+                    reasons['Mã mời đã đạt giới hạn 24 giờ.'] += 1
+                elif r['status'] not in ('completed','cancelled','invite_limit_reached'):
                     reasons[r['reason'] or 'Chưa ghi nhận lý do'] += 1
                 if (day is None or r['day']==day) and (owner_id is None or r['chat_id']==owner_id):
                     selected_runs.append(r)

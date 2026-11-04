@@ -5,7 +5,7 @@
 > **Mới:** [Thống kê, tiếp tục job và mua mail bù](THONG_KE_VA_TIEP_TUC_JOB_2026-11-04.md).
 > Lịch sử job chuyển sang **Thống kê**, có lọc người/tất cả và bấm biểu đồ để xem
 > chi tiết. Job có nút **Tiếp tục**, xác nhận trước khi dừng; **Log** tự cập nhật.
-> Lỗi tài khoản được mua mail bù, dừng ở 3 lỗi liên tiếp hoặc tổng 5 lỗi/đợt.
+> Lỗi tài khoản được mua mail bù, dừng ở 3 lỗi liên tiếp hoặc tổng 5 lỗi/job.
 > Các mô tả cũ về không mua bù sau lỗi tài khoản được thay thế bởi quy tắc mới.
 
 Tài liệu này hướng dẫn dùng hai giao diện để quản lý cùng một VPS:
@@ -217,10 +217,11 @@ kiểm tra log và xử lý nguyên nhân.
 | --- | --- |
 | **Dashboard** | Xem tổng quan và job gần đây |
 | **Job đang chạy** | Xem tiến độ, trạng thái, bean và lịch tiếp tục |
-| **Log** tại từng job | Mở nhật ký đúng mã job đó |
+| **Log** tại từng job | Mở nhật ký đúng mã job đó; dòng mới tự nối khoảng mỗi giây |
 | **Đồng bộ VPS** | Lấy danh sách và trạng thái mới |
-| **Dừng** tại từng job | Yêu cầu dừng job hoặc hủy lịch chờ của job đó |
-| **Lịch sử job → Xuất CSV** | Lưu lịch sử ra tệp để kiểm tra |
+| **Dừng** tại từng job | Xác nhận rồi dừng job hoặc hủy lịch chờ của job đó |
+| **Tiếp tục** tại từng job | Tạo job mới cho phần bean còn thiếu, giữ người sở hữu/đơn giá |
+| **Thống kê → Lịch sử job / Chi tiết** | Chọn tháng, từng người/tất cả, phân trang và xuất CSV lịch sử |
 
 Job đang xử lý/chờ được ưu tiên, các job mới nằm trước. Sau khi tạo, giao diện
 tự mở tab và chọn job mới. Danh sách tự cập nhật khoảng 2,5 giây/lần.
@@ -230,6 +231,12 @@ và xem trạng thái trước khi gửi thêm lệnh tạo job.
 
 Với combo, số bean trong bảng là tổng đã đạt qua các đợt. Khi hủy đơn khách,
 hệ thống tính theo bean đã thành công và hoàn phần tiền chưa dùng.
+
+Tab **Thống kê** có biểu đồ lợi nhuận, số job và lượt khách theo ngày của tháng,
+cùng biểu đồ tròn tỷ lệ lý do lỗi. Bấm cột để xem danh sách job theo người,
+các dòng tổng tài chính hoặc mã mời trong ngày. Có tổng lượt khách hôm nay,
+tuần này và tháng đang chọn. Một đợt combo kết thúc tính một lượt khách;
+doanh thu/chi phí cả combo chỉ ghi vào ngày job kết thúc cuối cùng.
 
 ## 7. Kho mail và lấy mã mời tài khoản
 

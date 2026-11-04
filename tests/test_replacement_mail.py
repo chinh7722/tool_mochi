@@ -112,10 +112,23 @@ class ReplacementTests(unittest.IsolatedAsyncioTestCase):
     async def test_recovered_proxy_exhaustion_flag_retries_account_slots_until_budget(self):
         r=self.runner([] ,probe=True)
         r._process_account=AsyncMock(side_effect=lambda _j,_c,item,*a,**k:
-            MochiAccountResult(item.identifier,False,'network_error','failed recovery',{'stop_job':True}))
+            MochiAccountResult(item.identifier,False,'network_error','failed recovery',data={'stop_job':True}))
         result=await r.run('network','CODE',10)
         self.assertEqual((result.status,result.failure_count),('failed',3))
         self.assertEqual(self.purchases,[1,1,1])
+
+    async def test_combo_remaining_failure_budget_uses_prior_round_errors(self):
+        r=self.runner(['auth_failed','success'],probe=True)
+        r.failure_budget_used=4
+        result=await r.run('last-budget','CODE',10,initial_success_count=3)
+        self.assertEqual((result.status,result.failure_count,result.success_count),('failed',1,3))
+        self.assertEqual(self.purchases,[1])
+
+    async def test_exhausted_persisted_budget_never_buys_mail(self):
+        r=self.runner([],probe=True);r.failure_budget_used=5
+        result=await r.run('exhausted-budget','CODE',10,initial_success_count=3)
+        self.assertEqual((result.status,result.success_count),('failed',3))
+        self.assertEqual(self.purchases,[])
 
 
 if __name__=='__main__':unittest.main(verbosity=2)

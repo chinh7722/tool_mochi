@@ -97,8 +97,12 @@ class MochiInviteRunner:
         mail_proxy_pool=None,
         probe_invite_first: bool = True,
         invite_quota_store=None,
+        failure_budget_used=0,
     ):
         self.cloud_client = cloud_client
+        if type(failure_budget_used) is not int or failure_budget_used < 0:
+            raise ValueError('Tổng lỗi đã ghi nhận không hợp lệ.')
+        self.failure_budget_used = failure_budget_used
         self.proxy_client = proxy_client
         self.concurrency = max(1, concurrency)
         self.concurrency_limit = concurrency_limit
@@ -318,6 +322,9 @@ class MochiInviteRunner:
         source_batch_lock = None
 
         try:
+            if self.failure_budget_used >= 5 and base_success_count < target_count:
+                return MochiInviteJobSummary(job_id,clean_code,target_count,0,base_success_count,0,0,
+                    'failed',(),'Đạt giới hạn tổng 5 lỗi trong job.')
             quota=self._quota_snapshot(clean_code)
             if quota is not None:
                 self._emit_log(job_id,f'Mã mời [{clean_code}]: {quota.count}/10 lượt thành công trong 24 giờ gần nhất, còn {quota.remaining} lượt.')
@@ -655,10 +662,10 @@ class MochiInviteRunner:
                     elif result.data.get('quota_tracking_error'):
                         terminal_status = 'failed'
                         error_msg = result.message or 'Dừng job sau khi phục hồi kết nối không thành công.'
-                if not terminal_status and (consecutive_failures >= 3 or failure_count + already_redeemed_count >= 5):
+                if not terminal_status and (consecutive_failures >= 3 or self.failure_budget_used + failure_count + already_redeemed_count >= 5):
                     terminal_status = 'failed'
                     error_msg = ('Đạt giới hạn 3 lỗi liên tiếp.' if consecutive_failures >= 3
-                        else 'Đạt giới hạn tổng 5 lỗi trong đợt chạy.')
+                        else 'Đạt giới hạn tổng 5 lỗi trong job.')
                 message = (f'Nhập mã thành công ({success_count}/{target_count})' if succeeded
                            else f'{result.status}: {result.message}')
                 self._emit_log(job_id, message, account=item.identifier,
@@ -668,10 +675,10 @@ class MochiInviteRunner:
                     failure_count += 1
                     consecutive_failures += 1
                     results.append(MochiAccountResult(item.identifier, False, 'processing_error', str(exc)))
-                    if consecutive_failures >= 3 or failure_count + already_redeemed_count >= 5:
+                    if consecutive_failures >= 3 or self.failure_budget_used + failure_count + already_redeemed_count >= 5:
                         terminal_status = 'failed'
                         error_msg = ('Đạt giới hạn 3 lỗi liên tiếp.' if consecutive_failures >= 3
-                            else 'Đạt giới hạn tổng 5 lỗi trong đợt chạy.')
+                            else 'Đạt giới hạn tổng 5 lỗi trong job.')
                 else:
                     terminal_status = 'failed'
                     error_msg = str(exc)
@@ -702,9 +709,9 @@ class MochiInviteRunner:
                     account_idx=0
                     self._emit_log(job_id,f'Mã mời đã thử thành công; còn {target_count-success_count} lượt, '
                         f'sẽ mua phần còn thiếu sau khi tính {len(remaining_spares)} mail shop đã giao dư.')
-                if consecutive_failures >= 3 or failure_count + already_redeemed_count >= 5:
+                if consecutive_failures >= 3 or self.failure_budget_used + failure_count + already_redeemed_count >= 5:
                     terminal_status = 'failed'
-                    error_msg = 'Đạt giới hạn 3 lỗi liên tiếp hoặc tổng 5 lỗi trong đợt chạy.'
+                    error_msg = 'Đạt giới hạn 3 lỗi liên tiếp hoặc tổng 5 lỗi trong job.'
                     break
                 if provided is not None and account_idx >= len(provided) and not active_tasks and may_replenish:
                     used = {r.account_identifier for r in results}
@@ -721,7 +728,7 @@ class MochiInviteRunner:
                         account_idx = 0
                         remaining_spares = []
                         self._emit_log(job_id, f'Mua bù {replacement_amount} mail cho lượt lỗi; '
-                            f'đã lỗi {failure_count+already_redeemed_count}/5, liên tiếp {consecutive_failures}/3.')
+                            f'đã lỗi {self.failure_budget_used+failure_count+already_redeemed_count}/5, liên tiếp {consecutive_failures}/3.')
                 # Outstanding tasks already reserve part of the remaining target.
                 available = min(self.current_concurrency() - len(active_tasks),
                     target_count - success_count - len(active_tasks))
