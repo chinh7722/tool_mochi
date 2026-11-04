@@ -299,5 +299,28 @@ class ComboLifecycleTests(unittest.TestCase):
         self.assertEqual(self.started,[])
 
 
+    def test_statistics_counts_each_finished_combo_round_once_and_keeps_whole_job_open(self):
+        jid=self.customer()
+        self.dispatch(jid)
+        self.finish_round(jid,10)
+        month=Clock.current.strftime('%Y-%m')
+        report=self.store.statistics(month)
+        self.assertEqual(report['customer_total'],1)
+        self.assertEqual(report['total'],0)
+        self.assertIsNone(self.store.get_job(jid).finalized_at)
+        self.store=TelegramUserStore(self.store.path)
+        self.assertEqual(self.store.statistics(month)['customer_total'],1)
+
+    def test_statistics_distinguishes_repeated_quota_only_combo_rounds(self):
+        jid=self.create()
+        quota=SimpleNamespace(limit_reached=True,count=10,next_available_at=None)
+        with patch.object(self.mochi,'_invite_quota_snapshot',return_value=quota):
+            for _ in range(2):
+                self.dispatch(jid)
+                self.assertIn(jid,self.mochi._scheduled_jobs)
+        with self.store._connection() as db:
+            self.assertEqual(db.execute('SELECT COUNT(*) FROM job_runs WHERE job_id=?',(jid,)).fetchone()[0],2)
+
+
 if __name__ == '__main__':
     unittest.main()

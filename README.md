@@ -1,5 +1,12 @@
 # hoshino-tool — Mochi Chat, Proxy Pool & Telegram
 
+> **[Thống kê và tiếp tục job](THONG_KE_VA_TIEP_TUC_JOB_2026-11-04.md):** tab
+> Thống kê có biểu đồ lợi nhuận, số job, lượt khách theo ngày và tỷ lệ lý do lỗi;
+> bấm cột để xem theo người. Lịch sử chuyển sang đây, có lọc từng người/tất cả.
+> Bảng job có Tiếp tục phần bean thiếu, xác nhận trước khi dừng, log tự nối dòng.
+> Lượt tài khoản lỗi được mua mail bù; dừng ở 3 lỗi liên tiếp hoặc tổng 5 lỗi/đợt.
+> Những mô tả cũ “không mua bù sau lỗi tài khoản” bên dưới đã được thay thế.
+
 > **[CSV báo cáo theo người dùng](BAO_CAO_CSV_THEO_NGUOI_DUNG_2026-11-03.md):**
 > chọn người trong bảng Telegram rồi bấm **Xuất báo cáo CSV** trên tool/web.
 > Bot dùng `/baocao`: partner xuất của mình; admin dùng `/baocao CHAT_ID` để xuất

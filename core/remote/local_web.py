@@ -15,7 +15,7 @@ import webbrowser
 from core.remote.client import RemoteClient
 from core.remote.protocol import MAX_BODY, RemoteError, encode
 
-COMMANDS = frozenset(('job.create', 'job.stop', 'job.logs', 'proxy.import', 'proxy.check',
+COMMANDS = frozenset(('job.create', 'job.stop', 'job.continue', 'job.logs', 'statistics.get', 'proxy.import', 'proxy.check',
     'proxy.rotate', 'proxy.delete', 'proxy.export', 'settings.save', 'telegram.save',
     'telegram.start', 'telegram.stop', 'telegram.broadcast', 'telegram.cancel_broadcast',
     'user.save', 'user.active', 'user.mail_keys', 'user.jobs', 'user.report', 'customer.save',
@@ -38,7 +38,7 @@ def browser_numbers(value):
 
 def restore_numbers(payload):
     payload = dict(payload)
-    for key in ('chat_id', 'expected_units'):
+    for key in ('chat_id', 'owner_id', 'expected_units'):
         value = payload.get(key)
         if isinstance(value, str) and re.fullmatch(r'-?[0-9]{1,19}', value):
             payload[key] = int(value)

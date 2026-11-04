@@ -4,7 +4,7 @@ No window is shown. Qt's event loop owns the controllers on the VPS, and HTTP
 commands are marshalled onto that thread. Clients never own running workers.
 """
 from dataclasses import asdict
-from datetime import datetime
+from datetime import datetime, timedelta
 from decimal import Decimal
 import html
 import json
@@ -36,6 +36,7 @@ class Runtime:
         self.telegram = TelegramPage(settings=self.settings, mochi_page=self.mochi)
         self.proxy.proxies_updated.connect(self.mochi._update_proxy_tab_status)
         self.closing = False
+        self.log_epoch = uuid.uuid4().hex
         self.mochi.chk_headless.setChecked(True)
 
     def shutdown(self):
@@ -49,11 +50,15 @@ class Runtime:
     def state(self):
         m, t = self.mochi, self.telegram
         jobs = []
+        with t.store._connection() as db:
+            continued = {r[0] for r in db.execute('SELECT source_id FROM job_continuations')}
         for record in list(m._session_jobs.values())[-500:]:
             jobs.append({key: getattr(record, key, None) for key in (
                 'job_id', 'invite_code', 'customer_name', 'creator_name', 'creator_chat_id',
                 'status', 'target_count', 'success_count', 'failure_count', 'attempted_count',
                 'created_at', 'scheduled_at', 'combo')})
+            jobs[-1]['can_continue'] = (record.is_terminal and record.success_count < record.target_count
+                and record.job_id not in m._workers and record.job_id not in continued)
         def proxies(page):
             rows = []
             for item in list(page._proxies.values())[:2000]:
@@ -101,7 +106,7 @@ class Runtime:
         if self.closing:
             raise RemoteError('VPS đang dừng dịch vụ; không nhận lệnh mới.')
         actions = {name: getattr(self, 'do_' + name.replace('.', '_')) for name in (
-            'job.create', 'job.stop', 'job.logs', 'proxy.import', 'proxy.check', 'proxy.rotate',
+            'job.create', 'job.stop', 'job.continue', 'job.logs', 'statistics.get', 'proxy.import', 'proxy.check', 'proxy.rotate',
             'proxy.delete', 'settings.save', 'telegram.save', 'telegram.start', 'telegram.stop',
             'telegram.broadcast', 'telegram.cancel_broadcast', 'user.save', 'user.active',
             'user.mail_keys', 'user.jobs', 'user.report', 'customer.save', 'customer.delete', 'customer.balance',
@@ -148,8 +153,52 @@ class Runtime:
 
     def do_job_logs(self, data):
         jid = text_field(data, 'job_id', maximum=80)
-        lines = self.mochi._job_logs.get(jid, [])[-1000:]
-        return {'lines': [html.unescape(re.sub('<[^>]+>', '', line)) for line in lines]}
+        lines = self.mochi._job_logs.get(jid, [])
+        cursor = data.get('cursor')
+        if cursor is not None and (type(cursor) is not int or cursor<0):
+            raise RemoteError('Vị trí log không hợp lệ.')
+        reset = cursor is None or data.get('epoch')!=self.log_epoch or cursor>len(lines)
+        start = max(0,len(lines)-1000) if reset else cursor
+        end = min(len(lines), start+1000)
+        return {'lines': [html.unescape(re.sub('<[^>]+>', '', line)) for line in lines[start:end]],
+            'cursor':end,'epoch':self.log_epoch,'reset':reset,'job_id':jid}
+
+    def do_job_continue(self, data):
+        jid = text_field(data,'job_id',maximum=80)
+        m, store = self.mochi, self.telegram.store
+        source = store.get_job(jid)
+        if source is None or source.finalized_at is None or jid in m._workers:
+            raise RemoteError('Chờ job kết thúc trước khi tiếp tục.')
+        child = store.continuation(jid)
+        if child:
+            return dict(job_id=child,message='Job đã có lần tiếp tục: '+child)
+        owner = store.get_user(source.chat_id)
+        keys = self.telegram._job_mail_keys(jid)
+        remaining = source.target_count-source.success_count
+        if remaining<=0 or source.status=='completed':
+            raise RemoteError('Job đã đủ bean.')
+        saved = json.loads(source.schedule_data or '{}')
+        record = m._session_jobs.get(jid)
+        customer = record.customer_name if record else saved.get('customer_name','')
+        def register(new_id, _code, _points, _target, **options):
+            return store.create_continuation(jid,new_id,**options)
+        new_id = m._on_start_clicked(code=source.code,points=remaining*100,customer_name=customer,
+            creator_name=owner.name,creator_chat_id=source.chat_id if source.chat_id>0 else None,
+            before_start=register,mail_api_keys=keys,combo=saved.get('combo') is True,
+            scheduled_at=datetime.now().astimezone()+timedelta(seconds=3))
+        if not new_id:
+            raise RemoteError(m.validation_label.text() or 'Chưa tạo được phần còn thiếu.')
+        if source.chat_id>0:
+            self.telegram._job_chats[new_id]=(source.bot_fingerprint,source.chat_id)
+        return dict(job_id=new_id,message=f'Đã tiếp tục {jid}: tạo {new_id} cho {remaining*100} bean còn thiếu.')
+
+    def do_statistics_get(self, data):
+        month = text_field(data,'month',maximum=7)
+        owner = data.get('owner_id')
+        if owner is not None:
+            owner = integer(data,'owner_id',minimum=-1)
+        return self.telegram.store.statistics(month,day=data.get('day'),owner_id=owner,
+            offset=data.get('offset',0),limit=data.get('limit',100))
 
     def pool(self, data):
         pool = data.get('pool', 'account')

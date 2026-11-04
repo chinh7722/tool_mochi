@@ -28,6 +28,9 @@ def initialize(self):
     self._job_row_buttons=[]
     self._config_loaded=False
     self._log_job_id=None
+    self._log_cursor=None
+    self._log_epoch=None
+    self._log_polling=False
     self._refresh_requested=False
     self._pending_focus_job_id=None
     self.proxy_views={}
@@ -57,7 +60,7 @@ def initialize(self):
     self.page_contents={}
     for index,builder in enumerate((self.build_dashboard,self.build_mochi,
             lambda:self.build_proxy('account'),lambda:self.build_proxy('mail'),
-            self.build_telegram,self.build_settings)):
+            self.build_telegram,self.build_settings,lambda:__import__('gui.remote_statistics',fromlist=['build_statistics']).build_statistics(self))):
         page=builder()
         self.page_contents[index]=page
         if index in (0,5):
@@ -76,6 +79,10 @@ def initialize(self):
     self.timer=QTimer(self)
     self.timer.timeout.connect(self.poll)
     self.timer.start(2500)
+    self.log_timer=QTimer(self);self.log_timer.timeout.connect(self.poll_logs);self.log_timer.start(1000)
+    self.statistics_timer=QTimer(self)
+    self.statistics_timer.timeout.connect(lambda:self.statistics_panel.load() if self.pages.currentIndex()==6 else None)
+    self.statistics_timer.start(10000)
     root_path=Path(__file__).resolve().parents[1]
     if root_path.name=='src':
         root_path=root_path.parent
@@ -110,11 +117,11 @@ def build_sidebar(self):
     caption.setAlignment(Qt.AlignmentFlag.AlignCenter)
     caption.setStyleSheet('font-size:9px;color:#93a5c4;margin-top:2px;margin-bottom:24px;')
     box.addWidget(caption)
-    definitions=(('TỔNG QUAN',(('Dashboard',0,'nav_dashboard','nav_dashboard.svg'),)),
+    definitions=(('TỔNG QUAN',(('Dashboard',0,'nav_dashboard','nav_dashboard.svg'),('Thống kê',6,'nav_dashboard','nav_dashboard.svg'))),
         ('NỀN TẢNG',(('Mochi Chat',1,'nav_mochi','nav_mochi_chat.svg'),)),
         ('HỆ THỐNG',(('Proxy Pool',2,'nav_proxy','nav_proxy.svg'),('Proxy mua mail',3,'nav_proxy','nav_proxy.svg'),
                     ('Telegram',4,'nav_telegram','nav_telegram.svg'),('Cài đặt chung',5,'nav_settings','nav_settings.svg'))))
-    self.nav=[None]*6
+    self.nav=[None]*7
     for title,buttons in definitions:
         label=QLabel(title)
         label.setStyleSheet('font-size:10px;font-weight:700;color:#69758b;margin:15px 12px 8px;')

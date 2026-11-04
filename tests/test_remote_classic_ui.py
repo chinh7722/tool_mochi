@@ -63,6 +63,8 @@ class ClassicRemoteUiTests(unittest.TestCase):
         self.state=snapshot()
         self.calls=[]
         self.window.send=self.send
+        self.window.poll_logs=lambda:self.send('job.logs',{'job_id':self.window._log_job_id},
+            lambda r:self.window.logs.setPlainText('\n'.join(r['lines'])))
         self.window.render({'state':self.state})
 
     def new_window(self):
@@ -265,7 +267,9 @@ class ClassicRemoteUiTests(unittest.TestCase):
         buttons=self.window.jobs.cellWidget(0,7).findChildren(QPushButton)
         stop=next(button for button in buttons if button.text()=='Dừng')
         self.assertTrue(stop.isEnabled())
-        stop.click()
+        from PySide6.QtWidgets import QMessageBox
+        with patch('gui.remote_window.QMessageBox.question',return_value=QMessageBox.StandardButton.Yes):
+            stop.click()
         self.assertEqual(self.calls,[('job.stop',{'job_id':'combo-one'})])
 
     def test_polling_preserves_unsaved_combo_choice(self):

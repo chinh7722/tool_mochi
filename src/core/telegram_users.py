@@ -15,6 +15,7 @@ import uuid
 from core.config.constants import MOCHI_INVITATION_REWARD_POINTS
 from core.finance import MailPurchaseReceipt, MAX_MONEY_UNITS
 from core.customer_accounts import CustomerAccountsMixin
+from core.job_statistics import JobStatisticsMixin
 from core.job_history import JOB_TIMEZONE, JobHistoryEntry
 from core.job_schedule import schedule_storage, schedule_time
 from core.mail.user_keys import validated_user_mail_keys
@@ -118,7 +119,7 @@ def _text(value, label, limit, *, empty=False):
     return clean
 
 
-class TelegramUserStore(CustomerAccountsMixin):
+class TelegramUserStore(CustomerAccountsMixin, JobStatisticsMixin):
     """Use short, independent SQLite transactions so GUI and bot threads can share it.
 
     Statistics are derived from job rows, never incremented counters. A result can
@@ -213,6 +214,7 @@ class TelegramUserStore(CustomerAccountsMixin):
                 (LOCAL_USER_ID, stamp, stamp))
         self.receipt_directory = self.path.parent / 'mail_purchase_receipts' / self.path.stem
         self._init_customer_accounts()
+        self._init_statistics()
         self.recovery_errors = 0
         self._recover_purchase_receipts()
 

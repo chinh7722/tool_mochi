@@ -270,7 +270,7 @@ class RuntimeTests(unittest.TestCase):
         from gui.remote_window import RemoteMainWindow
         with patch('core.remote.runtime.Runtime',side_effect=AssertionError('No local workers')):
             window=RemoteMainWindow()
-            self.assertEqual(window.pages.count(),6)
+            self.assertEqual(window.pages.count(),7)
             window.render({'state':self.runtime.state()})
             self.assertEqual(window.users.rowCount(),1)
             self.assertIsNone(window.client)

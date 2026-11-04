@@ -735,3 +735,43 @@ Quy trình phát triển và hoàn thiện công cụ trải qua 8 vòng lặp (
   invite_probe_mail_proxy27, finance24); cả 111 ca này cũng PASS trên Ubuntu.
   Root/src đồng bộ byte; không mua mail thật.
 
+### Thống kê theo ngày, tiếp tục job và mua mail bù — 04/11/2026
+
+- Thêm `core/job_statistics.py`, bảng SQLite `job_runs` và `job_continuations`.
+  Mỗi job/đợt combo kết thúc ghi một lượt khách, khóa đợt chống callback lặp.
+  Đợt chỉ trả quota trước khi tạo worker cũng có khóa theo lịch riêng. Job cũ
+  đã kết thúc được nhập một lần; không suy đoán lịch sử combo/lý do chưa từng lưu.
+- `statistics.get` đọc snapshot nhất quán, tiền theo đơn vị nguyên, ngày UTC+7.
+  Biểu đồ lợi nhuận ghi theo ngày kết thúc job; không cộng lại doanh thu ở từng
+  đợt combo. Tổng có chỉ báo dữ liệu chờ đối soát; lợi nhuận chưa biết để trống.
+  Lịch sử theo người/tất cả, theo ngày/tháng, phân trang100, tổng tính toàn bộ
+  bộ lọc. Có ba biểu đồ cột lợi nhuận/job/lượt khách và pie lý do lỗi; bấm cột
+  hiện job theo từng người với dòng tổng và danh sách mã mời theo ngày.
+- Tool thêm trang Thống kê, chuyển lịch sử ra khỏi Mochi. Web dùng SVG local,
+  không thêm CDN. Tổng khách hôm nay, tuần thứ Hai–hôm nay và tháng đang chọn.
+  Tiền/Chat ID lớn qua web vẫn lossless; không đưa key/mail đã mua vào thống kê.
+- `job.continue` tạo job con cho bean còn thiếu, giữ owner/rate cũ và bảo toàn
+  job trước. Quan hệ nguồn→con lưu bền vững để bấm lại không tạo trùng. Đơn khách
+  giữ tiền ví phần còn thiếu trong cùng transaction; số dư thiếu/khách đã xóa/
+  chủ đã thu hồi quyền bị chặn. Nút Tiếp tục cạnh Log/Dừng, chỉ bật khi phù hợp.
+- Dừng trên desktop/web có xác nhận; luồng Telegram và shutdown không hỏi.
+  `job.logs` trả cursor/epoch và dòng tăng thêm, client tự nối mỗi giây khi đang
+  xem, không lặp dòng; đổi runtime thì reset. Đang đọc dòng cũ không ép cuộn cuối.
+- Runner mua bù đúng lượt tài khoản lỗi, tận dụng mail dư đã trả trước khi mua
+  thêm; lỗi mail thử chỉ thử từng mail đến khi mã được xác nhận. Dừng ở3 lỗi liên
+  tiếp hoặc5 lỗi tổng mỗi đợt; thành công xóa streak, tài khoản đã nhập mã tính
+  vào tổng lỗi. Mã sai/quota/lỗi bộ đếm/giao dịch shop chưa rõ vẫn dừng ngay theo
+  chính sách. Lô chỉ định có sẵn không tự mua thêm; shop trả thiếu không tự bù
+  phần chưa giao. Mọi mail mua thêm lưu lô và ghi chi phí vào đúng owner/job.
+- Windows hồi quy1000 ca, sau đó hai nhóm fixture Chromium23/TLS25 sửa theo
+  hành vi mới đều PASS; thêm hai ca mail dư và quota-only combo cũng PASS:
+  1002 ca riêng biệt đã qua. Runner, combo, tiền ví, ngưỡng lỗi, bấm biểu đồ,
+  xác nhận và nối log qua HTTP đều kiểm thử offline, không mua/gửi/thanh toán thật.
+  Preview `.tmp/statistics_web.png`, `.tmp/statistics_desktop_1120.png` và
+  `_detail.png`. Hướng dẫn `THONG_KE_VA_TIEP_TUC_JOB_2026-11-04.md`.
+  Ubuntu hồi quy1000 ca (fixture TLS cũ lỗi), sau cập nhật fixture và hai ca mới:
+  TLS25, mua bù11, lô mail41, probe27, logic37, proxy concurrency10, combo14,
+  thống kê13, HTTP/Qt9 và desktop16 đều PASS; tổng1002 ca riêng biệt qua trên Ubuntu.
+  Khi rollout cần sao lưu trước migration, không restart lúc đang có job/
+  thông báo đang gửi, giữ trạng thái bot/SePay và đối chiếu lịch combo.
+

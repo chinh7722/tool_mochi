@@ -10,7 +10,7 @@ from PySide6.QtCore import QDateTime, QSettings, Qt, QThread, QTimer, Signal, QS
 from PySide6.QtWidgets import (QAbstractItemView, QApplication, QCheckBox, QComboBox,
     QDateTimeEdit, QDialog, QFileDialog, QFormLayout, QHBoxLayout, QLabel, QLineEdit,
     QMainWindow, QPlainTextEdit, QPushButton, QScrollArea, QSpinBox, QStackedWidget,
-    QTabWidget, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget)
+    QTabWidget, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget, QMessageBox)
 from gui.branding import BrandSidebar, WORKSPACE_STYLE, icon
 from core.remote.client import RemoteClient
 from core.remote.protocol import RemoteError
@@ -95,6 +95,8 @@ class RemoteMainWindow(QMainWindow):
         self.pages.setCurrentIndex(index)
         for number,button in enumerate(self.nav):
             button.setChecked(number==index)
+        if index==6 and hasattr(self,'statistics_panel'):
+            self.statistics_panel.load()
 
     def page(self,caption):
         widget=QWidget()
@@ -258,6 +260,21 @@ class RemoteMainWindow(QMainWindow):
         jid=self.selected(self.jobs,'job_id')
         if jid:
             self.open_job_logs(jid)
+
+    def stop_selected_job(self):
+        jid=self.selected(self.jobs,'job_id')
+        if jid:self.confirm_stop_job(jid)
+
+    def confirm_stop_job(self,jid):
+        answer=QMessageBox.question(self,'Xác nhận dừng job',
+            f'Bạn có muốn dừng / hủy lịch job {jid}?',
+            QMessageBox.StandardButton.Yes|QMessageBox.StandardButton.No,QMessageBox.StandardButton.No)
+        if answer==QMessageBox.StandardButton.Yes:
+            self.send('job.stop',{'job_id':jid})
+
+    def continue_selected_job(self):
+        jid=self.selected(self.jobs,'job_id')
+        if jid:self.send('job.continue',{'job_id':jid},self.job_created)
 
     def upload_batch(self):
         path,_ = QFileDialog.getOpenFileName(self,'Chọn lô mail đã mua','','JSON (*.json)')
@@ -505,14 +522,30 @@ class RemoteMainWindow(QMainWindow):
     def open_job_logs(self,job_id):
         if not job_id:
             return
-        def display(result):
-            self._log_job_id=job_id
-            self.job_log_filter.setText('Job: '+job_id)
-            self.logs.setPlainText('\n'.join(result.get('lines',[])))
-            self.activate(1)
-            self.workspace_tabs.setCurrentIndex(0)
-            self.mochi_tabs.setCurrentIndex(2)
-        self.send('job.logs',{'job_id':job_id},display)
+        self._log_job_id=job_id
+        self._log_cursor=None;self._log_epoch=None
+        self.job_log_filter.setText('Job: '+job_id+' · Tự cập nhật mỗi giây')
+        self.logs.clear()
+        self.activate(1);self.workspace_tabs.setCurrentIndex(0);self.mochi_tabs.setCurrentIndex(2)
+        self.poll_logs()
+
+    def poll_logs(self):
+        if (not self.client or not self._connected or self._closing or self._log_polling or
+                not self._log_job_id or self.pages.currentIndex()!=1 or self.mochi_tabs.currentIndex()!=2):return
+        self._log_polling=True
+        jid=self._log_job_id;client=self.client
+        payload=dict(job_id=jid,cursor=self._log_cursor,epoch=self._log_epoch)
+        def display(response):
+            if jid!=self._log_job_id or client is not self.client:return
+            result=response['result']
+            scroll=self.logs.verticalScrollBar();at_end=scroll.value()>=scroll.maximum()-4
+            if result.get('reset'):self.logs.clear()
+            lines=result.get('lines',[])
+            if lines:self.logs.appendPlainText('\n'.join(lines))
+            self._log_cursor=result.get('cursor');self._log_epoch=result.get('epoch')
+            if at_end:scroll.setValue(scroll.maximum())
+        worker=self.task(lambda:client.command('job.logs',payload),display)
+        worker.finished.connect(lambda:setattr(self,'_log_polling',False))
 
     def save_job_draft(self,*,quiet=False):
         draft=dict(code=self.job_code.text(),customer=self.job_customer.text(),points=self.job_points.value(),
@@ -639,8 +672,9 @@ class RemoteMainWindow(QMainWindow):
             layout=QHBoxLayout(actions)
             layout.setContentsMargins(4,3,4,3);layout.setSpacing(4)
             for caption,callback,allowed in (
-                ('Dừng',lambda _=False,jid=record['job_id']:self.send('job.stop',{'job_id':jid}),record.get('status') not in terminal),
-                ('Log',lambda _=False,jid=record['job_id']:self.open_job_logs(jid),True)):
+                ('Dừng',lambda _=False,jid=record['job_id']:self.confirm_stop_job(jid),record.get('status') not in terminal),
+                ('Log',lambda _=False,jid=record['job_id']:self.open_job_logs(jid),True),
+                ('Tiếp tục',lambda _=False,jid=record['job_id']:self.send('job.continue',{'job_id':jid},self.job_created),record.get('can_continue',False))):
                 button=QPushButton(caption)
                 button.setStyleSheet('padding:4px 8px;font-size:11px;')
                 button.clicked.connect(callback)
@@ -666,11 +700,6 @@ class RemoteMainWindow(QMainWindow):
         else:
             self.job_sync_status.setText(f'Đã đồng bộ {len(display)} job từ VPS lúc {updated} · '
                 'Job đang xử lý và job mới hiển thị trước.')
-        labels={'completed':'Hoàn thành','failed':'Thất bại','cancelled':'Đã hủy',
-                'invalid_code':'Mã không hợp lệ','invite_limit_reached':'Đạt giới hạn 24h'}
-        history=[{**r,'status':labels.get(r.get('status'),r.get('status','')),
-                  'finished_display':format_time(r.get('finished_at'))} for r in state['history']]
-        fill(self.history,history,['job_id','order_id','creator_name','invite_code','status','achieved_beans','finished_display'])
         self.proxy_views['account'].update_rows(state['proxies'])
         self.proxy_views['mail'].update_rows(state['mail_proxies'])
         self.telegram_presentation.refresh(state)

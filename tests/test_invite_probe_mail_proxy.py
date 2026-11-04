@@ -77,7 +77,7 @@ class ProbeTests(unittest.IsolatedAsyncioTestCase):
         finish.set()
         self.assertEqual((await task).success_count,10)
 
-    async def test_each_probe_failure_stops_without_buying_the_remaining_mail(self):
+    async def test_invalid_probe_stops_and_account_errors_retry_up_to_three_probes(self):
         for status in ('invite_limit_reached','invalid_code','auth_failed','already_redeemed','network_error'):
             self.requests.clear()
             self.runner=MochiInviteRunner(mail_batch_dir=self.temp.name,mail_via_proxy=False,
@@ -85,9 +85,10 @@ class ProbeTests(unittest.IsolatedAsyncioTestCase):
             self.runner._process_account=AsyncMock(side_effect=lambda _j,_c,item,*a,**kw:
                 MochiAccountResult(item.identifier,False,status,message='Probe rejected'))
             result=await self.runner.run('probe-'+status,'TEST',10)
-            self.assertEqual(self.requests,[1])
+            expected=1 if status in ('invite_limit_reached','invalid_code') else 3
+            self.assertEqual(self.requests,[1]*expected)
             self.assertEqual(result.success_count,0)
-            self.assertEqual(len(self.runner.purchased_accounts),1)
+            self.assertEqual(len(self.runner.purchased_accounts),expected)
 
     async def test_target_one_never_buys_a_second_batch(self):
         result=await self.runner.run('one','TEST',1)

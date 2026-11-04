@@ -1,6 +1,12 @@
 # Hướng dẫn sử dụng Hoshino Tool — Phần mềm và web local
 
-*Cập nhật: 03/11/2026.*
+*Cập nhật: 04/11/2026.*
+
+> **Mới:** [Thống kê, tiếp tục job và mua mail bù](THONG_KE_VA_TIEP_TUC_JOB_2026-11-04.md).
+> Lịch sử job chuyển sang **Thống kê**, có lọc người/tất cả và bấm biểu đồ để xem
+> chi tiết. Job có nút **Tiếp tục**, xác nhận trước khi dừng; **Log** tự cập nhật.
+> Lỗi tài khoản được mua mail bù, dừng ở 3 lỗi liên tiếp hoặc tổng 5 lỗi/đợt.
+> Các mô tả cũ về không mua bù sau lỗi tài khoản được thay thế bởi quy tắc mới.
 
 Tài liệu này hướng dẫn dùng hai giao diện để quản lý cùng một VPS:
 

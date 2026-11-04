@@ -44,6 +44,7 @@ class FakeVPS:
         self.commands=[]
         self.seen={}
         self.offline=False
+        self.log_lines=['Đang xử lý job fixture-job','<log is plain text>']
 
     def factory(self,url,token):
         RemoteClient(url,token)  # Validate actual connection constraints without connecting.
@@ -66,7 +67,26 @@ class FakeVPS:
                 target_count=(payload['points']+99)//100,success_count=0,failure_count=0,attempted_count=0,
                 created_at=datetime.now(timezone.utc).isoformat(),scheduled_at=payload.get('scheduled_at'),combo=payload.get('combo',False)))
             result['job_id']=jid
-        elif action=='job.logs': result['lines']=['Đang xử lý job '+payload['job_id'],'<log is plain text>']
+        elif action=='job.logs':
+            cursor=payload.get('cursor')
+            reset=cursor is None or payload.get('epoch')!='fixture-epoch'
+            start=0 if reset else cursor
+            result.update(lines=self.log_lines[start:],cursor=len(self.log_lines),epoch='fixture-epoch',reset=reset)
+        elif action=='statistics.get':
+            from calendar import monthrange
+            month=payload['month'];year,number=map(int,month.split('-'))
+            days=[dict(day=f'{month}-{d:02}',jobs=1 if d==4 else 0,customers=2 if d==4 else 0,
+                revenue_units=300000,cost_units=20000,profit_units=280000,pending_jobs=0) for d in range(1,monthrange(year,number)[1]+1)]
+            selected=payload.get('owner_id')
+            owners=[dict(chat_id=202,name='Partner A'),dict(chat_id=303,name='Partner B')]
+            owners=[o for o in owners if selected is None or str(o['chat_id'])==str(selected)]
+            rows=[dict(job_id='statistics-'+str(o['chat_id']),chat_id=o['chat_id'],name=o['name'],code='CODE'+str(o['chat_id']),
+                status='completed',success_count=3,revenue_units=300000,cost_units=20000,profit_units=280000,
+                finalized_at=f'{month}-04T09:00:00+07:00',finished_at=f'{month}-04T09:00:00+07:00') for o in owners]
+            result=dict(month=month,days=days,owners=[dict(chat_id=202,name='Partner A'),dict(chat_id=303,name='Partner B')],
+                customer_counts=dict(today=2,week=3,month=4),reasons=[dict(reason='Google lỗi',count=1)],
+                users=[dict(**o,jobs=1,revenue_units=300000,cost_units=20000,profit_units=280000,pending_jobs=0) for o in owners],
+                history=rows,customer_history=rows,total=len(rows),customer_total=len(rows),note='Offline statistics fixture')
         elif action=='telegram.broadcast': self.value['telegram']['broadcast_running']=True
         elif action=='telegram.cancel_broadcast': self.value['telegram']['broadcast_running']=False
         elif action=='batch.list': result['batches']=['paid_mail.json']

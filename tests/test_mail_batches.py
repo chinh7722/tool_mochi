@@ -200,13 +200,13 @@ class BatchTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((result.success_count, result.attempted_count), (3, 3))
         self.assertEqual(result.status, 'failed')
 
-    async def test_failed_accounts_do_not_trigger_more_purchases(self):
+    async def test_three_consecutive_failures_stop_with_unused_paid_mail(self):
         runner, client, context = self.setup_batch(10)
         runner._process_account.side_effect = lambda job, code, item, *args, **kw: MochiAccountResult(item.identifier, False, 'auth_failed')
         with patch(f'{RUNNER}.GmailVipVn', return_value=context):
             result = await runner.run('failures', 'TEST', 10)
         self.assertEqual(client.buy_gmail_domain_info.await_count, 1)
-        self.assertEqual((result.attempted_count, result.failure_count), (10, 10))
+        self.assertEqual((result.attempted_count, result.failure_count), (3, 3))
 
     async def test_stopped_job_keeps_unused_mail_on_disk(self):
         runner, client, context = self.setup_batch(10)

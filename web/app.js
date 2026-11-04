@@ -1,3 +1,4 @@
+import {installStatistics} from './statistics.js';
 const $ = id => document.getElementById(id);
 const app = {state: null, csrf: '', connected: false, busy: false, polling: false, needPoll: false,
   generation: 0, loaded: false, page: 'mochi', logJob: '', focusJob: '', selected: {}, recipients: new Set(),
@@ -13,7 +14,7 @@ const time = value => {if(!value) return ''; const d=new Date(value); return Num
 function money(value) {try {const v=BigInt(String(value || 0)), sign=v<0n?'-':'', a=v<0n?-v:v; return sign+(a/100n).toLocaleString('vi-VN')+(a%100n?','+String(a%100n).padStart(2,'0'):'');} catch {return '—';}}
 function toast(message, error=false) {clearTimeout(app.toastTimer); $('toast').textContent=message; $('toast').classList.toggle('error',error); $('toast').hidden=false; app.toastTimer=setTimeout(()=>{$('toast').hidden=true;},6500);}
 function status(message) {$('connection-status').textContent=message;}
-function page(name) {app.page=name; document.querySelectorAll('[data-view]').forEach(e=>e.hidden=e.dataset.view!==name); document.querySelectorAll('nav [data-page]').forEach(e=>e.classList.toggle('active',e.dataset.page===name)); window.scrollTo(0,0);}
+function page(name) {app.page=name; document.querySelectorAll('[data-view]').forEach(e=>e.hidden=e.dataset.view!==name); document.querySelectorAll('nav [data-page]').forEach(e=>e.classList.toggle('active',e.dataset.page===name)); window.scrollTo(0,0);if(name==='statistics')statistics.load();}
 function tab(group, name) {document.querySelectorAll(`[data-tabs="${group}"] [data-tab]`).forEach(e=>e.classList.toggle('active',e.dataset.tab===name)); document.querySelectorAll('[data-panel]').forEach(e=>{if(e.dataset.panel.startsWith(group+':')) e.hidden=e.dataset.panel!==group+':'+name;});}
 function newJob() {page('mochi'); tab('mochi-workspace','tasks'); tab('jobs','setup');}
 function button(text, action, id='', extra='') {return `<button type="button" ${action==='copy-code'?'':'data-mutation'} data-action="${action}" data-id="${esc(id)}" ${extra}>${esc(text)}</button>`;}
@@ -66,12 +67,10 @@ function renderJobs() {
   const s=app.state, rows=orderedJobs();
   $('job-queue').textContent=`Đang xử lý: ${s.active_jobs} / ${s.job_limit} job · Đang chờ: ${s.queued_jobs} · Hẹn giờ / Combo: ${s.scheduled_jobs}`;
   $('job-sync').textContent=`Đã đồng bộ ${rows.length} job · Job đang xử lý và job mới hiển thị trước.`;
-  table('jobs-table',rows,[['Tên khách / Job',r=>esc(r.customer_name || r.job_id)+(r.combo?' <span class="badge">Combo</span>':'')],['Mã mời','invite_code'],['Tiến độ',progress],['Trạng thái',r=>badge(r.status)],['Bean',r=>n(r.success_count*100)+' / '+n(r.target_count*100)],['Người tạo','creator_name'],['Thời gian',r=>esc((r.combo&&r.status==='Chờ lượt combo'?'Tiếp: ':'')+time(r.scheduled_at || r.created_at))],['Thao tác',r=>button('Log','job-logs',r.job_id)+button('Dừng','job-stop',r.job_id,terminal.has(r.status)?'data-allowed="false"':'')]],{key:'job_id',select:'jobs'});
+  table('jobs-table',rows,[['Tên khách / Job',r=>esc(r.customer_name || r.job_id)+(r.combo?' <span class="badge">Combo</span>':'')],['Mã mời','invite_code'],['Tiến độ',progress],['Trạng thái',r=>badge(r.status)],['Bean',r=>n(r.success_count*100)+' / '+n(r.target_count*100)],['Người tạo','creator_name'],['Thời gian',r=>esc((r.combo&&r.status==='Chờ lượt combo'?'Tiếp: ':'')+time(r.scheduled_at || r.created_at))],['Thao tác',r=>button('Log','job-logs',r.job_id)+button('Dừng','job-stop',r.job_id,terminal.has(r.status)?'data-allowed="false"':'')+button('Tiếp tục','job-continue',r.job_id,r.can_continue?'':'data-allowed="false"')]],{key:'job_id',select:'jobs'});
   // Use a local stylesheet rule instead of inline styles under the strict CSP.
   document.querySelectorAll('[data-progress]').forEach(e=>{const p=Math.round(Number(e.dataset.progress)/5)*5; e.className='p'+p;});
   if(app.focusJob) {const row=[...$('jobs-table').querySelectorAll('tr[data-key]')].find(e=>e.dataset.key===app.focusJob); if(row) {row.classList.add('selected'); row.scrollIntoView({block:'nearest'}); app.focusJob='';}}
-  const query=$('history-search').value.toLocaleLowerCase();
-  table('history-table',(s.history || []).filter(r=>[r.job_id,r.invite_code,r.creator_name,r.customer_name].some(v=>String(v||'').toLocaleLowerCase().includes(query))),[['Mã job','job_id'],['Mã đơn','order_id'],['Người tạo','creator_name'],['Mã mời','invite_code'],['Trạng thái',r=>badge(r.status)],['Bean thực tế',r=>n(r.achieved_beans)],['Kết thúc',r=>esc(time(r.finished_at))]]);
 }
 function renderDashboard() {
   const s=app.state, rows=orderedJobs();
@@ -171,7 +170,20 @@ function showUserReport(result, expectedOwner) {
   dialog('Báo cáo chi tiết theo người dùng',body);
 }
 function csv(rows, keys) {const cell=value=>{let s=String(value ?? ''); if(/^[=+\-@\t\r]/.test(s)) s="'"+s; return '"'+s.replace(/"/g,'""')+'"';}; return '\ufeff'+[keys,...rows.map(r=>keys.map(k=>r[k]))].map(row=>row.map(cell).join(',')).join('\r\n');}
-async function logs(jobId) {if(!jobId) throw Error('Chọn Log trên một job trước.'); await command('job.logs',{job_id:jobId},r=>{app.logJob=jobId; $('log-caption').textContent='Job: '+jobId; $('job-log').textContent=(r.lines || []).join('\n'); page('mochi'); tab('mochi-workspace','tasks'); tab('jobs','logs');});}
+let logCursor=null,logEpoch=null,logBusy=false;
+async function logs(jobId) {if(!jobId) throw Error('Chọn Log trên một job trước.');app.logJob=jobId;logCursor=null;logEpoch=null;$('job-log').textContent='';$('log-caption').textContent='Job: '+jobId+' · Tự cập nhật mỗi giây';page('mochi');tab('mochi-workspace','tasks');tab('jobs','logs');await pollLogs();}
+async function pollLogs() {
+  if(logBusy||!app.connected||!app.logJob||app.page!=='mochi'||document.querySelector('[data-panel="jobs:logs"]').hidden||document.hidden)return;
+  logBusy=true;const jobId=app.logJob,generation=app.generation;
+  try {const response=await api('/api/command',{action:'job.logs',payload:{job_id:jobId,cursor:logCursor,epoch:logEpoch},request_id:crypto.randomUUID()});
+    if(jobId!==app.logJob||generation!==app.generation)return;
+    const r=response.result,view=$('job-log'),atEnd=view.scrollTop+view.clientHeight>=view.scrollHeight-12;
+    if(r.reset)view.textContent='';const lines=r.lines||[];
+    if(lines.length)view.textContent+=(view.textContent?'\n':'')+lines.join('\n');
+    logCursor=r.cursor??null;logEpoch=r.epoch??null;if(atEnd)view.scrollTop=view.scrollHeight;
+  } catch(error){$('log-caption').textContent='Job: '+jobId+' · '+error.message;}
+  finally {logBusy=false;}
+}
 async function batches() {await command('batch.list',{},r=>{const prior=$('job-batch').value; $('job-batch').innerHTML='<option value="">Mua mail theo cấu hình VPS</option>'+(r.batches || []).map(v=>`<option value="${esc(v)}">${esc(v)}</option>`).join(''); $('job-batch').value=prior; quote();});}
 function saveDraft() {const f=$('job-form'); localStorage.setItem('hoshino.jobDraft',JSON.stringify({code:f.code.value,customer:f.customer.value,points:f.points.value,combo:f.combo.checked,scheduled:f.scheduled.checked,scheduled_at:f.scheduled_at.value})); toast('Đã lưu nháp job trên máy này.');}
 
@@ -186,7 +198,8 @@ document.addEventListener('click',async event=>{
       case 'running-jobs': page('mochi'); tab('mochi-workspace','tasks'); tab('jobs','running'); break;
       case 'save-draft': saveDraft(); break;
       case 'job-logs': await logs(id); break;
-      case 'job-stop': await command('job.stop',{job_id:id}); break;
+      case 'job-stop': if(confirm('Bạn có muốn dừng / hủy lịch job '+id+'?')) await command('job.stop',{job_id:id}); break;
+      case 'job-continue': await command('job.continue',{job_id:id},r=>{app.focusJob=r.job_id;page('mochi');tab('mochi-workspace','tasks');tab('jobs','running');}); break;
       case 'reload-logs': await logs(app.logJob); break;
       case 'history-export': await command('history.export',{},r=>download('\ufeff'+r.text.replace(/^\ufeff/,''),'job_history.csv','text/csv;charset=utf-8')); break;
       case 'upload-batch': $('batch-file').click(); break;
@@ -252,11 +265,13 @@ document.addEventListener('submit',async event=>{
 $('job-form').addEventListener('input',quote); $('job-batch').addEventListener('change',quote);
 $('broadcast-mode').addEventListener('change',renderRecipients); $('broadcast-text').addEventListener('input',broadcastCount);
 $('broadcast-people').addEventListener('change',event=>{const id=event.target.dataset.recipient; if(!id) return; if(event.target.checked) app.recipients.add(id); else app.recipients.delete(id); broadcastCount();});
-for(const [id,fn] of [['users-search',renderUsers],['customers-search',renderCustomers],['history-search',renderJobs]]) $(id).addEventListener('input',()=>{if(app.state) {fn(); controls();}});
+for(const [id,fn] of [['users-search',renderUsers],['customers-search',renderCustomers]]) $(id).addEventListener('input',()=>{if(app.state) {fn(); controls();}});
 $('batch-file').addEventListener('change',async event=>{const file=event.target.files[0]; event.target.value=''; if(!file) return; try {if(file.size>1500000) throw Error('File lô mail tối đa 1,5 MB.'); const data=JSON.parse((await file.text()).replace(/^\ufeff/,'')); if(!Array.isArray(data.accounts)) throw Error('File JSON phải chứa danh sách accounts.'); await command('batch.upload',{accounts:data.accounts},r=>{const option=new Option(r.batch,r.batch,true,true); $('job-batch').add(option); quote(); toast('Đã đưa lô mail lên VPS.');});} catch(error) {toast(error.message,true);}});
 makeProxy('account'); makeProxy('mail');
 field('job-form','scheduled_at').value=new Intl.DateTimeFormat('sv-SE',{timeZone:'Asia/Ho_Chi_Minh',year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',hour12:false}).format(new Date(Date.now()+300000)).replace(' ','T');
 try {const draft=JSON.parse(localStorage.getItem('hoshino.jobDraft') || '{}'); for(const key of ['code','customer','points','combo','scheduled','scheduled_at']) if(key in draft) {const e=field('job-form',key); if(e.type==='checkbox') e.checked=draft[key]===true; else e.value=draft[key];}} catch {}
 $('local-address').textContent=location.host; controls();
 async function boot() {try {const bootstrap=new URLSearchParams(location.hash.slice(1)).get('session'); if(bootstrap) {await api('/api/session',{}, {'X-Web-Bootstrap':bootstrap}); history.replaceState(null,'',location.pathname);} const config=await api('/api/config'); app.csrf=config.csrf; field('connection-form','url').value=config.url; $('connection-config').textContent=config.has_token?'Đã có token lưu trên máy; để trống để dùng lại.':'Chưa có token. Nhập token quản lý VPS tại đây.'; await poll(); setInterval(poll,2500);} catch(error) {status(error.message); toast(error.message,true);}}
+const statistics=installStatistics({$,app,api,esc,money,n,time,table,toast,idValue});
+setInterval(pollLogs,1000);
 boot();

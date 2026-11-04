@@ -394,6 +394,7 @@ class MochiChatPage(QWidget):
         self.scheduled_job_cancel = None
         self.scheduled_job_defer = None
         self.combo_job_reschedule = None
+        self.job_run_recorder = None
         self.job_mail_keys_resolver = None
         self._active_job_ids = set()
         self._dispatching_jobs = False
@@ -1747,6 +1748,7 @@ class MochiChatPage(QWidget):
         record._round_attempted_base = record.attempted_count
         record._round_failure_base = record.failure_count
         record._round_pending = True
+        record._statistics_round_id = uuid.uuid4().hex
         self._session_jobs[job_id] = record
         self._selected_job_id = job_id
         self._lbl_log_filter_update()
@@ -1884,6 +1886,7 @@ class MochiChatPage(QWidget):
         if not due:
             return
         for job_id, record in sorted(due, key=lambda pair: pair[1].scheduled_at):
+            record._statistics_round_id = 'scheduled:'+record.scheduled_at.isoformat()
             try:
                 if self.scheduled_job_claim is None:
                     raise RuntimeError('Chưa sẵn sàng xác minh lịch job đã lưu.')
@@ -1984,6 +1987,10 @@ class MochiChatPage(QWidget):
             self.btn_stop.setText("🛑 DỪNG")
 
     def _on_stop_clicked(self):
+        if QMessageBox.question(self,'Xác nhận dừng job','Bạn có muốn dừng job đã chọn hoặc các job đang chạy?',
+                QMessageBox.StandardButton.Yes|QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No)!=QMessageBox.StandardButton.Yes:
+            return
         if self._selected_job_id and (self._selected_job_id in self._workers or self._selected_job_id in self._scheduled_jobs):
             self._stop_job(self._selected_job_id)
         else:
@@ -1991,6 +1998,12 @@ class MochiChatPage(QWidget):
             running_jids = list(self._scheduled_jobs) + list(self._pending_jobs) + list(self._active_job_ids)
             for jid in running_jids:
                 self._stop_job(jid)
+
+    def _confirm_stop_job(self, job_id):
+        if QMessageBox.question(self,'Xác nhận dừng job',f'Bạn có muốn dừng / hủy lịch job {job_id}?',
+                QMessageBox.StandardButton.Yes|QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No)==QMessageBox.StandardButton.Yes:
+            self._stop_job(job_id)
 
     def _stop_job(self, job_id: str):
         worker = self._workers.get(job_id)
@@ -2148,6 +2161,15 @@ class MochiChatPage(QWidget):
             record.success_count = max(record.success_count,summary.success_count)
             record.failure_count = max(record.failure_count,summary.failure_count)
             record.attempted_count = max(record.attempted_count,summary.attempted_count)
+            if self.job_run_recorder is not None:
+                from core.job_failure import job_failure_reason
+                try:
+                    self.job_run_recorder(jid, getattr(record, '_statistics_round_id', 'initial'),
+                        summary.status, record.success_count, record.attempted_count,
+                        job_failure_reason(summary) if summary.status not in ('completed','cancelled','invite_limit_reached') else '')
+                except Exception:
+                    self._append_log_line('Chưa ghi được đợt chạy vào thống kê khách hàng. Kiểm tra dữ liệu VPS.',
+                        color='#fbbf24',job_id=jid)
             if record.combo:
                 summary = replace(summary,success_count=record.success_count,
                     attempted_count=record.attempted_count,failure_count=record.failure_count)
@@ -2198,6 +2220,13 @@ class MochiChatPage(QWidget):
 
         record = self._session_jobs.get(job_id)
         if record:
+            if self.job_run_recorder is not None:
+                from core.job_failure import job_failure_reason
+                try:
+                    self.job_run_recorder(job_id,getattr(record,'_statistics_round_id','initial'),
+                        'failed',record.success_count,record.attempted_count,job_failure_reason(message=err_msg))
+                except Exception:
+                    self._append_log_line('Chưa ghi được đợt chạy vào thống kê khách hàng.',job_id=job_id)
             record.status = "Thất bại"
             record.failure_message = err_msg
             self._render_jobs_table()
@@ -2280,7 +2309,7 @@ class MochiChatPage(QWidget):
                     "QPushButton:hover { background-color: #dc2626; }"
                 )
                 btn_stop.setCursor(Qt.CursorShape.PointingHandCursor)
-                btn_stop.clicked.connect(lambda _, x=jid: self._stop_job(x))
+                btn_stop.clicked.connect(lambda _, x=jid: self._confirm_stop_job(x))
                 act_layout.addWidget(btn_stop)
             else:
                 btn_del = QPushButton("Xóa", act_widget)

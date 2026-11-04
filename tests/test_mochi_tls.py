@@ -548,10 +548,10 @@ class RunnerTlsTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(factory.call_args.kwargs['proxies'], replacement.to_curl_cffi_dict())
         self.assert_pool_drained(broker, state)
 
-    async def test_persistent_tls_failure_stops_before_buying_another_account(self):
+    async def test_persistent_tls_failure_stops_after_three_failed_account_slots(self):
         runner, broker, state, replacement = self.make_runner()
         state.provider.get_current_or_rotate = AsyncMock(return_value=RotationResult(True, replacement))
-        attempts = [session(request_error(35)) for _ in range(3)]
+        attempts = [session(request_error(35)) for _ in range(9)]
         mail_client = SimpleNamespace(buy_gmail_domain_info=AsyncMock(return_value=[
             SimpleNamespace(username='purchased-once@example.com', password='offline-password')]))
         mail_context = AsyncMock()
@@ -562,17 +562,17 @@ class RunnerTlsTests(unittest.IsolatedAsyncioTestCase):
              patch('core.platforms.mochichat.runners.invite_referral.GmailVipVn', return_value=mail_context) as mail:
             result = await runner.run('tls-runner-exhausted', 'TEST', 2)
         self.assertEqual(result.status, 'failed')
-        self.assertEqual(result.attempted_count, 1)
-        self.assertEqual(result.failure_count, 1)
+        self.assertEqual(result.attempted_count, 3)
+        self.assertEqual(result.failure_count, 3)
         self.assertEqual(result.success_count, 0)
         self.assertEqual(result.results[0].account_identifier, 'purchased-once@example.com')
         self.assertTrue(result.results[0].data['stop_job'])
-        mail.assert_called_once()
-        mail_client.buy_gmail_domain_info.assert_awaited_once()
-        google.assert_awaited_once()
-        state.provider.get_current_or_rotate.assert_awaited_once()
+        self.assertEqual(mail.call_count,3)
+        self.assertEqual(mail_client.buy_gmail_domain_info.await_count,3)
+        self.assertEqual(google.await_count,3)
+        self.assertEqual(state.provider.get_current_or_rotate.await_count,5)  # 3 recoveries + 2 between failed accounts
         posts = [call for owned in attempts for call in owned.post.call_args_list]
-        self.assertEqual(len(posts), 3)
+        self.assertEqual(len(posts), 9)
         self.assertTrue(all(call.args[0].endswith('/auth/google') for call in posts))
         self.assert_pool_drained(broker, state)
 

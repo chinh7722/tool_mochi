@@ -118,9 +118,9 @@ class JobSyncTests(unittest.TestCase):
             time.sleep(0.005)
         self.fail(message + '; status=' + self.window.status.text())
 
-    def desktop_create(self, code='DESKTOP'):
+    def desktop_create(self, code='DESKTOP',points=100):
         self.window.job_code.setText(code)
-        self.window.job_points.setValue(100)
+        self.window.job_points.setValue(points)
         self.window.job_customer.setText('Same customer')
         before = set(self.runtime.mochi._session_jobs)
         self.window.create_job()
@@ -214,6 +214,68 @@ class JobSyncTests(unittest.TestCase):
                    'second job did not arrive')
         self.assertEqual(self.window.jobs._rows[0]['job_id'], second)
         self.assertEqual(self.window.selected(self.window.jobs, 'job_id'), first)
+
+
+    def test_log_cursor_appends_new_lines_live_through_actual_http_without_reopening(self):
+        jid=self.desktop_create('LIVELOG')
+        self.until(lambda:not self.window._mutating,'create busy')
+        self.runtime.mochi._append_log_line('FIRST LIVE LINE',job_id=jid)
+        self.window.open_job_logs(jid)
+        self.until(lambda:'FIRST LIVE LINE' in self.window.logs.toPlainText(),'initial log missing')
+        self.runtime.mochi._append_log_line('SECOND LIVE LINE',job_id=jid)
+        self.until(lambda:'SECOND LIVE LINE' in self.window.logs.toPlainText(),'log did not auto-refresh')
+        self.assertEqual(self.window.logs.toPlainText().count('FIRST LIVE LINE'),1)
+        cursor=self.window._log_cursor
+        result=self.runtime.command('job.logs',dict(job_id=jid,cursor=cursor,epoch=self.window._log_epoch))
+        self.assertEqual(result['lines'],[])
+        self.assertFalse(result['reset'])
+        self.runtime.log_epoch='new-runtime'
+        self.window.poll_logs()
+        self.until(lambda:self.window._log_epoch=='new-runtime','log epoch not reset')
+        self.assertEqual(self.window.logs.toPlainText().count('FIRST LIVE LINE'),1)
+
+    def test_continue_failed_job_preserves_source_and_creates_only_remaining_bean_for_same_owner(self):
+        jid=self.desktop_create('REMAIN',points=1000)
+        self.until(lambda:not self.window._mutating,'create busy')
+        m=self.runtime.mochi
+        m._on_job_finished(MochiInviteJobSummary(jid,'REMAIN',10,5,2,3,0,'failed',()))
+        m._on_worker_stopped(jid)
+        result=self.runtime.command('job.continue',{'job_id':jid})
+        child=self.runtime.telegram.store.get_job(result['job_id'])
+        self.assertEqual((child.chat_id,child.requested_beans,child.target_count),(-1,800,8))
+        self.assertEqual(self.runtime.telegram.store.get_job(jid).success_count,2)
+        replay=self.runtime.command('job.continue',{'job_id':jid})
+        self.assertEqual(replay['job_id'],child.job_id)
+        row=next(r for r in self.runtime.state()['jobs'] if r['job_id']==jid)
+        self.assertFalse(row['can_continue'])
+
+    def test_stop_ui_no_and_yes_capture_exact_id_while_backend_never_prompts(self):
+        from PySide6.QtWidgets import QMessageBox
+        jid=self.desktop_create('CONFIRM')
+        self.until(lambda:not self.window._mutating,'create busy')
+        count=self.bridge.commands.count('job.stop')
+        with patch('gui.remote_window.QMessageBox.question',return_value=QMessageBox.StandardButton.No):
+            self.window.confirm_stop_job(jid)
+        self.assertEqual(self.bridge.commands.count('job.stop'),count)
+        with patch('gui.remote_window.QMessageBox.question',return_value=QMessageBox.StandardButton.Yes):
+            self.window.confirm_stop_job(jid)
+        self.until(lambda:self.bridge.commands.count('job.stop')==count+1,'confirmed stop missing')
+
+    def test_statistics_records_one_completed_run_and_renders_person_totals(self):
+        jid=self.desktop_create('STATS',points=1000)
+        self.until(lambda:not self.window._mutating,'create busy')
+        m=self.runtime.mochi
+        summary=MochiInviteJobSummary(jid,'STATS',10,10,10,0,0,'completed',())
+        m._on_job_finished(summary);m._on_job_finished(summary)
+        m._on_worker_stopped(jid)
+        self.window.activate(6)
+        panel=self.window.statistics_panel
+        self.until(lambda:getattr(panel,'total',0)==1,'statistics not displayed')
+        self.assertEqual(panel.history.rowCount(),2)  # job and owner total
+        report=self.runtime.command('statistics.get',dict(month=panel.month.date().toString('yyyy-MM')))
+        self.assertEqual((report['total'],report['customer_total']),(1,1))
+        self.assertEqual(len(panel.charts),3)
+        self.assertIn('TỔNG',panel.history.item(1,0).text())
 
 
 if __name__ == '__main__':

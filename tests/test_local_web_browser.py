@@ -291,4 +291,53 @@ class LocalWebBrowserTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(await self.page.locator('#dialog').is_visible())
 
 
+    async def test_stop_confirmation_can_cancel_or_confirm_without_affecting_telegram(self):
+        self.fixture.fake.value['jobs'][0]['status']='Đang chạy'
+        await self.page.locator('.topbar [data-action="refresh"]').click()
+        await self.idle()
+        await self.page.locator('[data-tabs="jobs"] [data-tab="running"]').click()
+        async def dismiss(dialog):await dialog.dismiss()
+        self.page.once('dialog',dismiss)
+        await self.page.locator('#jobs-table [data-action="job-stop"]').first.click()
+        self.assertFalse(any(c[0]=='job.stop' for c in self.fixture.fake.commands))
+        async def accept(dialog):await dialog.accept()
+        self.page.once('dialog',accept)
+        await self.page.locator('#jobs-table [data-action="job-stop"]').first.click()
+        payload=await self.sent('job.stop')
+        self.assertTrue(payload['job_id'])
+
+    async def test_live_log_appends_new_lines_without_reopening_or_duplicate_old_lines(self):
+        await self.page.locator('[data-tabs="jobs"] [data-tab="running"]').click()
+        await self.page.locator('#jobs-table [data-action="job-logs"]').first.click()
+        await self.sent('job.logs')
+        self.fixture.fake.log_lines.append('Dòng mới theo thời gian thực')
+        await self.page.locator('#job-log').filter(has_text='Dòng mới theo thời gian thực').wait_for()
+        text=await self.page.locator('#job-log').text_content()
+        self.assertEqual(text.count('<log is plain text>'),1)
+        self.assertEqual(text.count('Dòng mới theo thời gian thực'),1)
+        self.assertEqual(self.errors,[])
+
+    async def test_statistics_charts_drilldown_owner_filter_and_history_location(self):
+        await self.nav('statistics')
+        await self.sent('statistics.get')
+        await self.page.locator('#stats-profit [data-stats-day]').first.wait_for()
+        self.assertEqual(await self.page.locator('[data-tabs="jobs"] [data-tab="history"]').count(),0)
+        await self.page.locator('#stats-profit [data-stats-day]').nth(3).click()
+        payload=await self.sent('statistics.get',2)
+        self.assertTrue(payload['day'].endswith('-04'))
+        await self.page.locator('#history-table').filter(has_text='TỔNG Partner A').wait_for()
+        await self.page.locator('#stats-owner').select_option('202')
+        payload=await self.sent('statistics.get',3)
+        self.assertEqual(str(payload['owner_id']),'202')
+        self.assertNotIn('Partner B',await self.page.locator('#history-table').text_content())
+        await self.page.locator('#stats-customers [data-stats-day]').nth(3).click()
+        await self.sent('statistics.get',4)
+        await self.page.locator('#stats-detail-caption').filter(has_text='lượt khách').wait_for()
+        self.assertIn('CODE202',await self.page.locator('#history-table').text_content())
+        self.assertIn('hôm nay 2',await self.page.locator('#stats-customers-summary').text_content())
+        self.assertIn('100.0%',await self.page.locator('#stats-reasons').text_content())
+        self.assertEqual(self.errors,[])
+        await self.page.screenshot(path=str(ROOT/'.tmp/statistics_web.png'),full_page=True)
+
+
 if __name__=='__main__': unittest.main()
