@@ -21,10 +21,15 @@ class StockCreateForm(QWidget):
         self.beans = QSpinBox();self.beans.setRange(100,1_000_000);self.beans.setSingleStep(100);self.beans.setValue(2000)
         self.product = QLineEdit();self.product.setPlaceholderText('ID product mua mail tạo acc và tích bean')
         self.product_default = product_default
+        self.gmailvip_key=QLineEdit();self.gmailvip_key.setEchoMode(QLineEdit.EchoMode.Password)
+        self.one_trieu_key=QLineEdit();self.one_trieu_key.setEchoMode(QLineEdit.EchoMode.Password)
+        for entry in (self.gmailvip_key,self.one_trieu_key):entry.setPlaceholderText('Chỉ dùng mua mail tạo acc — không dùng nhập mã mời')
         self.infinite = QCheckBox('Tích bean vô hạn — 10 lượt / 24 giờ (1.000 bean)')
         self.infinite.toggled.connect(lambda checked:self.beans.setEnabled(not checked))
         layout.addRow('Số acc cần tạo',self.count);layout.addRow('Bean mục tiêu mỗi acc',self.beans)
-        layout.addRow('Product ID',self.product);layout.addRow(self.infinite)
+        layout.addRow('Product ID',self.product)
+        layout.addRow('API GmailVip tạo acc',self.gmailvip_key);layout.addRow('API 1TrieuMail tạo acc',self.one_trieu_key)
+        layout.addRow(self.infinite)
         note = QLabel('Mua một lô bằng số acc yêu cầu, tạo/đăng nhập từng acc và lấy mã mời. '
             'Giữ tiến độ trên VPS; đạt giới hạn thì chờ 24 giờ 1 phút. Bean mục tiêu là tổng bean trong acc.')
         note.setWordWrap(True);layout.addRow(note)
@@ -32,8 +37,11 @@ class StockCreateForm(QWidget):
 
     def create(self):
         payload = dict(count=self.count.value(),beans=self.beans.value(),infinite=self.infinite.isChecked(),
-            product_ids=self.product.text().strip() or self.product_default())
-        self.command('stock.create',payload,lambda r:self.message.setText(r.get('message','Đã tạo lô.')))
+            product_ids=self.product.text().strip() or self.product_default(),
+            gmailvip_key=self.gmailvip_key.text().strip(),one_trieu_key=self.one_trieu_key.text().strip())
+        def accepted(result):
+            self.gmailvip_key.clear();self.one_trieu_key.clear();self.message.setText(result.get('message','Đã tạo lô.'))
+        self.command('stock.create',payload,accepted)
 
 
 class StockInventoryPanel(QWidget):

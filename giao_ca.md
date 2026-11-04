@@ -870,3 +870,27 @@ Quy trình phát triển và hoàn thiện công cụ trải qua 8 vòng lặp (
   `stock_creation_web.png`, `stock_inventory_web.png`. Gói nguồn427 file,
   không có data/.tmp/credential; hai launcher mới có trong allowlist Git.
 
+# API riêng chỉ mua mail tạo acc — 05/11/2026
+
+- Theo yêu cầu mới, bước mua mail ban đầu để tạo acc không còn lấy API Cài đặt
+  chung hoặc `/mailapi`. Tool/web có hai ô API mật khẩu ngay form tạo acc; nhập
+  key cho shop dùng, xóa ô sau khi VPS nhận lô. Không tự dùng key chung thay thế
+  khi thiếu key tạo acc.
+- StockController.create nhận mail_keys riêng, chốt cùng provider vào bảng
+  stock_batch_keys trong stock_accounts.sqlite3, cùng transaction tạo lô. Lô
+  queued/restart không bị đổi key/provider khi sửa cài đặt. Lô legacy chưa có
+  key riêng được chặn trước mua; các acc đã tạo/job tích bean giữ nguyên.
+- Luồng _dispatch và job_mail_keys_resolver không đổi: mail nhập mã mời vẫn dùng
+  API chung cho local/web, key `/mailapi` của owner đối với job bot. Không đưa
+  API tạo acc vào schedule_data, state, danh sách lô, lịch sử job hoặc log.
+- Bot admin có `/acc_mailapi KEY_GMAILVIP KEY_1TRIEUMAIL`, dùng `-` cho shop
+  không dùng; không truyền key để xem trạng thái. Lưu riêng theo admin trong
+  stock_creation_keys, không ghi đè bảng user_mail_keys. Key trong request
+  stock_data không hiện trong repr; phản hồi chỉ trạng thái đã/chưa nhập.
+- Thêm kiểm thử snapshot qua restart/đổi shop, key chung bị xóa, không fallback,
+  bot tạo lô dùng key riêng nhưng nhập mã dùng key owner, local nhập mã dùng key
+  chung, API không lộ qua state/list, form xóa key sau khi nhận thành công.
+- Bộ chốt188 ca PASS trên Windows và Ubuntu: stock38, desktop6, Chromium31,
+  runtime30, user_mail_keys26, telegram_bot28, combo16, localweb13. Không mua mail
+  hoặc gửi Telegram thật để test. Root/src đồng bộ; gói nguồn không chứa data.
+

@@ -11,9 +11,18 @@ def stock_control(page, worker, request, actor):
     data=request.stock_data
     action=request.action.removeprefix('stock_')
     try:
-        if action=='create':
+        if action=='mailapi':
+            if 'mail_keys' in data:store.set_creation_keys(actor.chat_id,data['mail_keys'])
+            keys=store.get_creation_keys(actor.chat_id)
+            from core.mail.providers.priority import GMAILVIP,ONE_TRIEU
+            text=('API riêng mua mail tạo acc: GmailVip '+('đã nhập' if keys[GMAILVIP] else 'chưa nhập')+
+                ' · 1TrieuMail '+('đã nhập' if keys[ONE_TRIEU] else 'chưa nhập')+
+                '.\nChỉ dùng mua mail ban đầu để tạo acc. Mail nhập mã mời vẫn dùng /mailapi của bạn.')
+        elif action=='create':
+            keys=store.get_creation_keys(actor.chat_id)
+            if not any(keys.values()):raise ValueError('Dùng /acc_mailapi KEY_GMAILVIP KEY_1TRIEUMAIL trước khi tạo acc; dùng - cho shop không dùng.')
             result=controller.create(**data,owner=actor.chat_id,
-                request_key=f'{worker.fingerprint}:{request.update_id}')
+                request_key=f'{worker.fingerprint}:{request.update_id}',mail_keys=keys)
             text=result['message']
         elif action=='list':
             rows=store.all();start=(data['page']-1)*10

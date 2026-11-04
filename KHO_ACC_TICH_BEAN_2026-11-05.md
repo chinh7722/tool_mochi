@@ -17,6 +17,9 @@ Tại **Mochi Chat → Nhiệm vụ → Thiết lập job**, chọn **Tạo acco
 2. Nhập tổng bean mục tiêu trong mỗi acc, bội số 100, tối đa 1.000.000.
 3. Nhập product ID mua mail; để trống trên giao diện để dùng product trong Cài đặt.
    Khi chọn cả hai shop, dùng ví dụ `gmailvip:3445,1trieumail:3423`.
+   Nhập **API GmailVip tạo acc / API 1TrieuMail tạo acc** ngay trong biểu mẫu.
+   Chỉ cần key cho shop đang dùng. Những key này chỉ mua lô mail ban đầu để tạo acc;
+   không dùng cho mail nhập mã mời. Ô API được xóa sau khi VPS nhận lô thành công.
 4. Hoặc bật **Tích bean vô hạn — 10 lượt / 24 giờ (1.000 bean)**. Khi bật, số bean
    mục tiêu không còn là điều kiện kết thúc; acc tích đến khi được dừng/xuất/xóa.
 5. Bấm **Bắt đầu tạo acc tích bean**.
@@ -30,9 +33,12 @@ Job tích bean dùng combo và giới hạn chung 10 lượt/mã trong 24 giờ.
 thì lưu tiến độ và hẹn sau 24 giờ 1 phút. Chế độ vô hạn chạy các chu kỳ 1.000 bean,
 sau mỗi chu kỳ chờ 24 giờ 1 phút trước chu kỳ mới. Các job dùng hàng đợi chung.
 
-Product của lô được giữ trong lịch combo; API key không nằm trong lịch. Tool/web
-dùng API chung; admin bot dùng API riêng của admin đó. Shop và đường proxy dùng
-cấu hình hiện tại. Không tính doanh thu bán bean cho job nội bộ kho acc; chi phí
+API tạo acc và shop mua ban đầu được chốt riêng trong dữ liệu lô trên VPS, không
+hiện lại trong danh sách hoặc log. Thay API chung sau khi xếp lô không đổi API
+đã chốt của lô. Product của lô được giữ trong lịch combo; API key không nằm trong
+lịch nhập mã. **Mail nhập mã mời** của job tool/web vẫn dùng API Cài đặt chung;
+job bot vẫn dùng API `/mailapi` của người tạo. Proxy theo cấu hình hiện tại.
+Không tính doanh thu bán bean cho job nội bộ kho acc; chi phí
 mail vẫn ghi đúng người tạo và giữ trong báo cáo giao dịch. Lô tạo acc có mã
 `stock_…`; job tích bean có mã `mochi_…` như các job khác.
 
@@ -77,6 +83,8 @@ và khách không được tạo/xem/xóa/xuất kho acc. Dùng `/help` để xe
 
 | Lệnh | Chức năng |
 |---|---|
+| `/acc_mailapi KEY_GMAILVIP KEY_1TRIEUMAIL` | Lưu API riêng của admin, chỉ mua mail tạo acc; dùng `-` cho shop không dùng |
+| `/acc_mailapi` | Xem shop nào đã nhập key; không trả lại key |
 | `/acc_create 5 5500 3445` | Tạo 5 acc, mục tiêu 5.500 bean mỗi acc |
 | `/acc_create 5 infinite 3445` | Tạo 5 acc tích vô hạn, 10 lượt/ngày |
 | `/accs 1` | Tổng acc/bean và danh sách trang 1; 10 acc/trang |
@@ -95,3 +103,13 @@ Trên Telegram, `/acc_done` thay thao tác đóng popup: chạy sau khi đã nh�
 Nếu chưa gửi được file, phiếu vẫn giữ để dùng `/acc_show`. Bot kiểm tra lại quyền
 admin trước khi gửi file. STT là ID kho, không đổi theo thứ tự hiển thị. Các admin
 quản lý chung kho; chi phí vẫn thuộc người tạo.
+
+Ví dụ dùng GmailVip cho bước tạo acc:
+
+```text
+/acc_mailapi KEY_TAO_ACC_GMAILVIP -
+/acc_create 5 5500 3445
+```
+
+Các mail phục vụ nhập mã mời sau đó vẫn mua bằng hai key đã lưu qua `/mailapi`,
+không dùng `KEY_TAO_ACC_GMAILVIP`. `/acc_mailapi` không thay đổi `/mailapi`.

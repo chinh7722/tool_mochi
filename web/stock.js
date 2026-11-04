@@ -12,8 +12,9 @@ export function installStock({$,app,api,command,esc,n,time,table,toast,controls}
   form.addEventListener('submit',async e=>{
     e.preventDefault();e.stopPropagation();
     const payload={count:Number(form.count.value),beans:Number(form.beans.value),infinite:form.infinite.checked,
-      product_ids:form.product_ids.value.trim()||app.state?.settings?.product_ids||''};
-    await command('stock.create',payload,r=>{$('stock-create-status').textContent=r.message;});
+      product_ids:form.product_ids.value.trim()||app.state?.settings?.product_ids||'',
+      gmailvip_key:form.gmailvip_key.value.trim(),one_trieu_key:form.one_trieu_key.value.trim()};
+    await command('stock.create',payload,r=>{form.gmailvip_key.value='';form.one_trieu_key.value='';$('stock-create-status').textContent=r.message;});
     load();
   });
   async function read(action,payload={}) {

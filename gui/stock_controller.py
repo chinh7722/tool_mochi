@@ -32,27 +32,28 @@ class StockController(QObject):
         self.timer.timeout.connect(self.tick)
         self.timer.start(2000)
 
-    def create(self, count, beans, infinite, product_ids, *, owner=-1, request_key=None):
+    def create(self, count, beans, infinite, product_ids, *, owner=-1, request_key=None, mail_keys=None):
         creation_options(count, beans, infinite, product_ids)
-        provider, keys = self.mail_settings(owner, product_ids)
+        provider, keys = self.mail_settings(product_ids,mail_keys)
         # Validate routing now, before accepting a billable task.
         self.m._account_lookup_route('stock_validate')
         if self.m.chk_use_proxy.isChecked() and self.m.chk_mail_via_proxy.isChecked():
             if self.m.mail_proxy_page is None or not self.m.mail_proxy_page.get_active_proxies():
                 raise ValueError('Thêm proxy mua mail hoặc bỏ chọn mua mail qua proxy trong Cài đặt.')
-        bid = self.store.create_batch(count, beans, infinite, product_ids, owner, request_key)
+        bid = self.store.create_batch(count, beans, infinite, product_ids, owner, request_key,mail_keys=keys,provider=provider)
         self.changed.emit()
         return {'batch_id':bid, 'message':'Đã lưu lô tạo acc '+bid+'. VPS sẽ mua một lô mail và tạo từng acc.'}
 
-    def mail_settings(self, owner, product_ids):
+    def mail_settings(self, product_ids, keys, *, provider=None):
         m = self.m
-        provider = m.combo_provider.currentData()
-        keys = (self.t.store.get_user_mail_keys(owner, require_complete=True) if owner > 0 else
-            {GMAILVIP:m.input_gmailvip_key.text().strip(), ONE_TRIEU:m.input_1trieumail_key.text().strip()})
+        provider = provider or m.combo_provider.currentData()
+        from core.stock_accounts import creation_mail_keys
+        keys=creation_mail_keys(keys or {})
+        if provider not in (GMAILVIP,ONE_TRIEU,MULTI_SHOP):raise ValueError('Shop mua mail tạo acc không hợp lệ.')
         if provider == MULTI_SHOP:
             choices = parse_mail_priority(product_ids)
             if any(not keys.get(c.provider) for c in choices):
-                raise ValueError('Chưa có API key cho các shop đã chọn.')
+                raise ValueError('Nhập API mua mail tạo acc riêng cho các shop đã chọn.')
         else:
             from core.mail.providers.gmailvip_vn import parse_gmailvip_product_ids
             from core.mail.providers.one_trieu_mail import parse_1trieumail_product_ids
@@ -60,7 +61,7 @@ class StockController(QObject):
                 raise ValueError('Product ID phải là số dương hoặc danh sách số, phân cách bằng dấu phẩy.')
             (parse_1trieumail_product_ids if provider == ONE_TRIEU else parse_gmailvip_product_ids)(product_ids)
             if not keys.get(provider):
-                raise ValueError('Chưa có API key mua mail cho shop đang chọn.')
+                raise ValueError('Nhập API mua mail tạo acc riêng cho shop đang chọn; không dùng API nhập mã mời để thay thế.')
         return provider, dict(keys)
 
     def _start(self, factory, error, on_result=None):
@@ -106,7 +107,11 @@ class StockController(QObject):
             self.last_error = 'Chưa xử lý được kho acc; kiểm tra cấu hình và dữ liệu VPS.'
 
     def _buy(self, batch):
-        provider, keys = self.mail_settings(batch['owner'], batch['product_ids'])
+        owner=self.t.store.get_user(batch['owner'])
+        if owner is None or not owner.active or (batch['owner']>0 and owner.role!='admin'):
+            raise PermissionError('Người tạo lô không còn quyền quản lý kho.')
+        provider,keys=self.store.batch_mail_settings(batch['id'])
+        provider,keys=self.mail_settings(batch['product_ids'],keys,provider=provider)
         pool = (self.m.mail_proxy_page.create_pool() if self.m.chk_use_proxy.isChecked()
             and self.m.chk_mail_via_proxy.isChecked() else None)
         if self.t.store.get_job(batch['id']) is None:

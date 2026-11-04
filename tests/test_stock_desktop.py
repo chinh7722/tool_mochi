@@ -30,9 +30,13 @@ class StockDesktopTests(unittest.TestCase):
         self.window.select_stock_mode(True)
         form=self.window.stock_create_panel
         form.count.setValue(5);form.beans.setValue(5500);form.product.setText('123');form.infinite.setChecked(True)
+        form.gmailvip_key.setText('creation-gmail');form.one_trieu_key.setText('creation-trieu')
         self.window.create_job()
         args=self.window.send.call_args.args
-        self.assertEqual(args[:2],('stock.create',dict(count=5,beans=5500,infinite=True,product_ids='123')))
+        self.assertEqual(args[:2],('stock.create',dict(count=5,beans=5500,infinite=True,product_ids='123',
+            gmailvip_key='creation-gmail',one_trieu_key='creation-trieu')))
+        args[2]({'message':'Accepted'})
+        self.assertEqual((form.gmailvip_key.text(),form.one_trieu_key.text()),('',''))
         self.assertTrue(self.window.invite_form.isHidden())
         self.assertFalse(form.beans.isEnabled())
 

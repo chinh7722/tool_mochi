@@ -131,7 +131,9 @@ class Runtime:
 
     def do_stock_create(self,data):
         return self.mochi.stock_controller.create(integer(data,'count',maximum=500),
-            integer(data,'beans',maximum=1_000_000),data.get('infinite',False),text_field(data,'product_ids',maximum=1000))
+            integer(data,'beans',maximum=1_000_000),data.get('infinite',False),text_field(data,'product_ids',maximum=1000),
+            mail_keys={'gmailvip_vn':text_field(data,'gmailvip_key',maximum=1000),
+                '1trieumail_com':text_field(data,'one_trieu_key',maximum=1000)})
 
     def do_stock_list(self,data):
         return self.mochi.stock_controller.list(integer(data,'offset',minimum=0,maximum=10_000_000) if 'offset' in data else 0)

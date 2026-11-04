@@ -128,12 +128,19 @@ def parse_control_command(text, chat_id, role, update_id):
         if role!='admin':
             raise ValueError('Chỉ admin đang được cấp quyền mới được quản lý kho acc.')
         values=text.strip().split()
-        aliases={'/acc_create':'create','/accs':'list','/acc_info':'info','/acc_batches':'batches','/acc_stop':'stop','/acc_resume':'resume',
+        aliases={'/acc_mailapi':'mailapi','/acc_create':'create','/accs':'list','/acc_info':'info','/acc_batches':'batches','/acc_stop':'stop','/acc_resume':'resume',
             '/acc_delete':'delete','/acc_export':'export','/acc_exports':'exports',
             '/acc_show':'show','/acc_done':'done','/acc_retry':'retry'}
         action=aliases.get(command)
         payload={}
-        if action=='create':
+        if action=='mailapi':
+            if len(values) not in (1,3):
+                raise ValueError('Cú pháp: /acc_mailapi KEY_GMAILVIP KEY_1TRIEUMAIL. Dùng - cho shop không dùng; bỏ key để xem trạng thái.')
+            if len(values)==3:
+                from core.stock_accounts import creation_mail_keys
+                payload={'mail_keys':creation_mail_keys({GMAILVIP:'' if values[1]=='-' else values[1],
+                    ONE_TRIEU:'' if values[2]=='-' else values[2]})}
+        elif action=='create':
             if len(values)!=4 or not values[1].isdigit() or (values[2].lower()!='infinite' and not values[2].isdigit()):
                 raise ValueError('Cú pháp: /acc_create SỐ_ACC BEAN_MỖI_ACC PRODUCT_ID. Dùng infinite thay số bean để tích vô hạn.')
             from core.stock_accounts import creation_options
@@ -321,6 +328,7 @@ class TelegramBotService:
         '/partner CHAT_ID: thông tin và thống kê của partner.\n'
         '/baocao CHAT_ID: xuất CSV mua mail và job của partner/admin khác.\n'
         'Kho acc (admin): /acc_create SỐ_ACC BEAN PRODUCT_ID (BEAN=infinite để tích vô hạn).\n'
+        '/acc_mailapi KEY_GMAILVIP KEY_1TRIEUMAIL: API riêng chỉ mua mail tạo acc; - cho shop không dùng.\n'
         '/accs [TRANG]: số acc, bean và danh sách. /acc_stop STT1,STT2: dừng; /acc_resume STT: tiếp tục.\n'
         '/acc_info STT: email, mật khẩu và thông tin acc. /acc_batches [TRANG]: tiến độ tạo acc.\n'
         '/acc_delete STT: xóa acc đã dừng. /acc_export STT1,STT2: xuất file mail|mật khẩu.\n'
@@ -472,7 +480,7 @@ class TelegramBotService:
             self.reply(chat_id, self.HELP+(self.ADMIN_HELP if self.access.role(chat_id)=='admin' else ''))
         elif base in ('/stats', '/users', '/user_add', '/user_revoke','/lich','/schedules','/huy','/cancel','/mailapi',
                 '/partner_add','/partner_remove','/partner_delete','/partners','/partner','/partner_info','/baocao','/report',
-                '/acc_create','/accs','/acc_info','/acc_batches','/acc_stop','/acc_resume','/acc_delete','/acc_export','/acc_exports','/acc_show','/acc_done','/acc_retry'):
+                '/acc_mailapi','/acc_create','/accs','/acc_info','/acc_batches','/acc_stop','/acc_resume','/acc_delete','/acc_export','/acc_exports','/acc_show','/acc_done','/acc_retry'):
             try:
                 request = parse_control_command(text, chat_id, self.access.role(chat_id), update_id)
             except ValueError as exc:

@@ -10,6 +10,19 @@ import sqlite3
 import uuid
 
 from core.job_schedule import VIETNAM_TIME
+from core.mail.providers.priority import GMAILVIP, ONE_TRIEU
+
+
+def creation_mail_keys(values):
+    if not isinstance(values,dict) or set(values)-{GMAILVIP,ONE_TRIEU}:
+        raise ValueError('API mua mail tạo acc không hợp lệ.')
+    result={}
+    for provider in (GMAILVIP,ONE_TRIEU):
+        value=values.get(provider,'')
+        if not isinstance(value,str) or len(value)>1000 or '://' in value or any(c.isspace() or ord(c)<32 or ord(c)==127 for c in value.strip()):
+            raise ValueError('API mua mail tạo acc phải là chuỗi không có khoảng trắng, tối đa 1.000 ký tự.')
+        result[provider]=value.strip()
+    return result
 
 
 def now():
@@ -57,6 +70,10 @@ class StockAccountStore:
                     id TEXT PRIMARY KEY, actor TEXT NOT NULL, state TEXT NOT NULL,
                     account_ids TEXT NOT NULL, content TEXT NOT NULL, created_at TEXT NOT NULL,
                     completed_at TEXT);
+                CREATE TABLE IF NOT EXISTS stock_creation_keys (
+                    owner INTEGER PRIMARY KEY, keys_json TEXT NOT NULL);
+                CREATE TABLE IF NOT EXISTS stock_batch_keys (
+                    batch_id TEXT PRIMARY KEY, provider TEXT NOT NULL, keys_json TEXT NOT NULL);
             ''')
         if os.name != 'nt':
             self.path.chmod(0o600)
@@ -75,8 +92,9 @@ class StockAccountStore:
         finally:
             db.close()
 
-    def create_batch(self, count, beans, infinite, product_ids, owner=-1, request_key=None):
+    def create_batch(self, count, beans, infinite, product_ids, owner=-1, request_key=None, *, mail_keys=None,provider=None):
         count, beans, infinite, product_ids = creation_options(count, beans, infinite, product_ids)
+        keys=creation_mail_keys(mail_keys) if mail_keys is not None else None
         with self.connection() as db:
             if request_key:
                 existing = db.execute('SELECT id FROM stock_batches WHERE request_key=?', (request_key,)).fetchone()
@@ -87,7 +105,27 @@ class StockAccountStore:
             bid = 'stock_' + uuid.uuid4().hex[:20]
             db.execute('INSERT INTO stock_batches VALUES (?,?,?,?,?,?,?, ?,?,?)',
                 (bid, count, beans, int(infinite), product_ids, owner, 'queued', '', now(), request_key))
+            if keys is not None:
+                db.execute('INSERT INTO stock_batch_keys VALUES (?,?,?)',(bid,provider,json.dumps(keys)))
             return bid
+
+    def set_creation_keys(self,owner,keys):
+        keys=creation_mail_keys(keys)
+        with self.connection() as db:
+            db.execute('INSERT INTO stock_creation_keys VALUES (?,?) ON CONFLICT(owner) DO UPDATE SET keys_json=excluded.keys_json',
+                (owner,json.dumps(keys)))
+
+    def get_creation_keys(self,owner):
+        with self.connection() as db:
+            row=db.execute('SELECT keys_json FROM stock_creation_keys WHERE owner=?',(owner,)).fetchone()
+        return creation_mail_keys(json.loads(row[0]) if row else {})
+
+    def batch_mail_settings(self,bid):
+        with self.connection() as db:
+            row=db.execute('SELECT provider,keys_json FROM stock_batch_keys WHERE batch_id=?',(bid,)).fetchone()
+        if row is None:
+            raise ValueError('Lô cũ chưa có API tạo acc riêng. Chưa mua mail; tạo lại lô với API riêng.')
+        return row['provider'],creation_mail_keys(json.loads(row['keys_json']))
 
     def batches(self):
         with self.connection() as db:

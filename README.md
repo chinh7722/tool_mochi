@@ -4,6 +4,8 @@
 > lấy mã mời và tích bean theo combo; có chế độ vô hạn 10 lượt/ngày. Kho lưu acc
 > đã tạo, chọn/dừng/xóa/xuất `mail|mật khẩu` và lịch sử xuất. Có lệnh bot cho admin.
 > File mở giao diện riêng: **Mo_Giao_Dien_Quan_Ly_VPS.bat**.
+> API mua mail tạo acc nhập riêng trong biểu mẫu hoặc `/acc_mailapi` trên bot.
+> Mail nhập mã mời vẫn dùng API Cài đặt chung hoặc `/mailapi` của người tạo.
 
 > **[Bảng giá, lịch sử tạm và log combo](BANG_GIA_LICH_SU_TAM_VA_LOG_2026-11-04.md):**
 > thêm giá theo mốc bean, tính theo tỷ lệ và chốt giá khi tạo job; biểu đồ khách

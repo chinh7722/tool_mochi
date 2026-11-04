@@ -4,8 +4,10 @@
 > Kho hiện lưu acc Mochi đã tạo, thay cho danh sách lô mail. Có mục tiêu/vô hạn,
 > dừng/tiếp tục, xóa có xác nhận và xuất với lịch sử riêng. Mở giao diện Windows
 > bằng **Mo_Giao_Dien_Quan_Ly_VPS.bat**.
+> API mua mail tạo acc nhập riêng trong biểu mẫu. Bot dùng `/acc_mailapi` cho
+> bước này; `/mailapi` và API Cài đặt chung vẫn chỉ phục vụ mail nhập mã mời.
 
-*Cập nhật: 04/11/2026.*
+*Cập nhật: 05/11/2026.*
 
 > **[Bảng giá, khách hàng theo mã mời và lịch sử tạm](BANG_GIA_LICH_SU_TAM_VA_LOG_2026-11-04.md):**
 > cấu hình giá theo tỷ lệ mốc bean tại tab Bảng giá. Lịch sử tạm ở Mochi có

@@ -212,6 +212,8 @@ class LocalWebBrowserTests(unittest.IsolatedAsyncioTestCase):
         await form.locator('[name="count"]').fill('5')
         await form.locator('[name="beans"]').fill('5500')
         await form.locator('[name="product_ids"]').fill('123')
+        await form.locator('[name="gmailvip_key"]').fill('creation-gmail')
+        await form.locator('[name="one_trieu_key"]').fill('creation-trieu')
         await form.locator('[name="infinite"]').check()
         self.assertTrue(await form.locator('[name="beans"]').is_disabled())
         self.assertFalse(await self.page.locator('#job-form').is_visible())
@@ -219,7 +221,10 @@ class LocalWebBrowserTests(unittest.IsolatedAsyncioTestCase):
         await self.page.screenshot(path=str(ROOT/'.tmp/stock_creation_web.png'),full_page=True)
         await form.locator('button[type="submit"]').click()
         payload=await self.sent('stock.create')
-        self.assertEqual(payload,dict(count=5,beans=5500,infinite=True,product_ids='123'))
+        self.assertEqual(payload,dict(count=5,beans=5500,infinite=True,product_ids='123',
+            gmailvip_key='creation-gmail',one_trieu_key='creation-trieu'))
+        self.assertEqual(await form.locator('[name="gmailvip_key"]').input_value(),'')
+        self.assertEqual(await form.locator('[name="one_trieu_key"]').input_value(),'')
         self.assertFalse(any(a=='job.create' for a,_,_ in self.fixture.fake.commands))
         self.assertEqual(self.errors,[])
 

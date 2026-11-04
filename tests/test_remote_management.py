@@ -140,6 +140,16 @@ class RuntimeTests(unittest.TestCase):
         self.assertEqual(state['version'],1)
         self.assertEqual(state['users'][0]['chat_id'],-1)
 
+    def test_stock_creation_api_keys_are_separate_from_general_settings_and_hidden(self):
+        r=self.runtime;m=r.mochi;m.chk_use_proxy.setChecked(False)
+        m.input_gmailvip_key.setText('general-invite-key')
+        result=r.command('stock.create',dict(count=1,beans=2000,infinite=False,product_ids='123',
+            gmailvip_key='private-create-key',one_trieu_key=''))
+        self.assertEqual(m.stock_controller.store.batch_mail_settings(result['batch_id'])[1]['gmailvip_vn'],'private-create-key')
+        self.assertEqual(m.input_gmailvip_key.text(),'general-invite-key')
+        self.assertNotIn(b'private-create-key',encode(r.state()))
+        self.assertNotIn(b'private-create-key',encode(r.command('stock.list',{})))
+
     def test_safe_settings_and_secrets_survive_restart(self):
         r=self.runtime
         r.command('settings.save',dict(provider='multi_shop',gmailvip_key='private-gmail-key',

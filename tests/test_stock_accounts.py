@@ -102,6 +102,15 @@ class StockStoreTests(unittest.TestCase):
         with self.assertRaises(ValueError):self.store.save_delivery(self.batch,[SimpleNamespace(username='a@example.com',password='pw')]*2)
         self.assertEqual(self.store.all(internal=True),[])
 
+    def test_creation_keys_are_owner_scoped_and_never_part_of_batch_lists(self):
+        self.store.set_creation_keys(123,{'gmailvip_vn':'private-creation-one'})
+        self.store.set_creation_keys(456,{'gmailvip_vn':'private-creation-two'})
+        restarted=StockAccountStore(self.path)
+        self.assertEqual(restarted.get_creation_keys(123)['gmailvip_vn'],'private-creation-one')
+        self.assertEqual(restarted.get_creation_keys(456)['gmailvip_vn'],'private-creation-two')
+        self.assertNotIn('private-creation',json.dumps(restarted.batches()))
+        self.assertEqual(restarted.get_creation_keys(999)['gmailvip_vn'],'')
+
 
 class PurchaseTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
@@ -156,6 +165,12 @@ class StockBotTests(unittest.TestCase):
         self.assertEqual(parse_control_command('/acc_info 7',123,'admin',1).stock_data,{'ids':[7]})
         self.assertEqual(parse_control_command('/acc_batches 2',123,'admin',2).stock_data,{'page':2})
         with self.assertRaises(ValueError):parse_control_command('/acc_info 7',123,'partner',1)
+
+    def test_creation_key_command_is_admin_only_and_masks_keys_in_request_repr(self):
+        r=parse_control_command('/acc_mailapi private-create -',123,'admin',1)
+        self.assertEqual(r.stock_data['mail_keys'],{'gmailvip_vn':'private-create','1trieumail_com':''})
+        self.assertNotIn('private-create',repr(r))
+        with self.assertRaises(ValueError):parse_control_command('/acc_mailapi a b',123,'partner',1)
 
     def test_export_txt_requires_admin_and_preserves_mail_password_lines(self):
         service=TelegramBotService(None,TelegramAccess((123,),roles={123:'admin'}),lambda _:None)
@@ -281,11 +296,11 @@ class StockControllerTests(unittest.TestCase):
         self.assertEqual(self.t.store.get_job(self.store.all()[0]['job_id']).target_count,15)
 
     def test_invalid_product_never_queues_a_purchase(self):
-        with self.assertRaises(ValueError):self.controller.create(1,2000,False,'not-a-product')
+        with self.assertRaises(ValueError):self.controller.create(1,2000,False,'not-a-product',mail_keys={'gmailvip_vn':'creation-key'})
         self.assertEqual(self.store.batches(),[])
 
     def test_initial_mail_purchase_does_not_invent_referral_beans_or_customers(self):
-        self.controller.create(1,2000,False,'123');batch=self.store.batches()[0]
+        self.controller.create(1,2000,False,'123',mail_keys={'gmailvip_vn':'creation-key'});batch=self.store.batches()[0]
         with patch.object(self.controller,'_start'):self.controller._buy(batch)
         job=self.t.store.get_job(batch['id'])
         self.assertEqual((job.target_count,job.sale_rate_units),(0,0))
@@ -296,14 +311,63 @@ class StockControllerTests(unittest.TestCase):
         self.assertEqual(report['customer_counts']['month'],0)
         self.assertEqual(sum(d['unique_customers'] for d in report['days']),0)
 
-    def test_key_removed_while_queued_does_not_buy_or_permanently_block_new_batches(self):
-        self.controller.create(1,2000,False,'123')
+    def test_general_key_removed_while_queued_does_not_change_creation_purchase_key(self):
+        self.controller.create(1,2000,False,'123',mail_keys={'gmailvip_vn':'creation-key'})
         self.m.input_gmailvip_key.clear()
-        with patch('gui.stock_controller.purchase_stock_batch') as purchase:self.controller.tick()
-        purchase.assert_not_called()
-        self.assertEqual(self.store.batches()[0]['state'],'failed')
-        self.m.input_gmailvip_key.setText('offline-key')
-        self.controller.create(1,2000,False,'123')
+        captured=[]
+        with patch.object(self.controller,'_start',side_effect=lambda fn,*args:captured.append(fn)):
+            self.controller.tick()
+        with patch('gui.stock_controller.purchase_stock_batch',new=AsyncMock()) as purchase:asyncio.run(captured[0]())
+        self.assertEqual(purchase.call_args.kwargs['keys']['gmailvip_vn'],'creation-key')
+        self.assertEqual(self.m.input_gmailvip_key.text(),'')
+
+    def test_missing_creation_key_cannot_fall_back_to_general_api(self):
+        with self.assertRaisesRegex(ValueError,'riêng'):self.controller.create(1,2000,False,'123')
+        self.assertEqual(self.store.batches(),[])
+
+    def test_creation_purchase_snapshot_survives_restart_and_source_changes(self):
+        self.controller.create(1,2000,False,'123',mail_keys={'gmailvip_vn':'private-create'})
+        batch=self.store.batches()[0]
+        self.controller.store=StockAccountStore(self.store.path)
+        self.m.combo_provider.setCurrentIndex(self.m.combo_provider.findData('1trieumail_com'))
+        captured=[]
+        with patch.object(self.controller,'_start',side_effect=lambda fn,*args:captured.append(fn)):self.controller._buy(batch)
+        with patch('gui.stock_controller.purchase_stock_batch',new=AsyncMock()) as purchase:asyncio.run(captured[0]())
+        self.assertEqual(purchase.call_args.kwargs['provider'],'gmailvip_vn')
+        self.assertEqual(purchase.call_args.kwargs['keys']['gmailvip_vn'],'private-create')
+        self.assertNotIn('private-create',json.dumps(self.controller.list()))
+
+    def test_local_referral_mail_still_uses_general_api(self):
+        self.store.set_creation_keys(-1,{'gmailvip_vn':'private-create'})
+        row=self.account();self.controller._dispatch(row);jid=self.store.all()[0]['job_id']
+        with patch.object(MochiWorkerThread,'start'):
+            self.m._check_scheduled_jobs(now=datetime.now(VIETNAM_TIME)+timedelta(seconds=1))
+        self.assertEqual(self.m._workers[jid].runner.mail_provider_api_key,'offline-key')
+        self.assertNotIn('private-create',self.t.store.get_job(jid).schedule_data)
+
+    def test_bot_referral_mail_still_uses_owner_mailapi_not_creation_keys(self):
+        self.t.store.upsert_user(123,'Admin','admin')
+        self.t.store.set_user_mail_keys(123,'owner-invite-key','owner-other-key')
+        self.store.set_creation_keys(123,{'gmailvip_vn':'private-create'})
+        row=self.account()
+        with self.store.connection() as db:db.execute('UPDATE stock_batches SET owner=123 WHERE id=?',(row['batch_id'],))
+        self.controller._dispatch(self.store.all()[0]);jid=self.store.all()[0]['job_id']
+        with patch.object(MochiWorkerThread,'start'):
+            self.m._check_scheduled_jobs(now=datetime.now(VIETNAM_TIME)+timedelta(seconds=1))
+        self.assertEqual(self.m._workers[jid].runner.mail_provider_api_key,'owner-invite-key')
+        self.assertEqual(self.t.store.get_user_mail_keys(123)['gmailvip_vn'],'owner-invite-key')
+
+    def test_bot_creation_command_snapshots_separate_keys_without_changing_mailapi(self):
+        from gui.stock_telegram import stock_control
+        self.t.store.upsert_user(123,'Admin','admin')
+        self.t.store.set_user_mail_keys(123,'owner-invite-key','owner-other-key')
+        actor=self.t.store.get_user(123);worker=SimpleNamespace(fingerprint='offline',reply=Mock())
+        stock_control(self.t,worker,parse_control_command('/acc_mailapi private-create -',123,'admin',1),actor)
+        self.assertNotIn('private-create',worker.reply.call_args.args[1])
+        stock_control(self.t,worker,parse_control_command('/acc_create 1 2000 123',123,'admin',2),actor)
+        batch=self.store.batches()[0]
+        self.assertEqual(self.store.batch_mail_settings(batch['id'])[1]['gmailvip_vn'],'private-create')
+        self.assertEqual(self.t.store.get_user_mail_keys(123)['gmailvip_vn'],'owner-invite-key')
 
 
 if __name__=='__main__':unittest.main()
