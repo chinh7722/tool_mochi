@@ -80,6 +80,39 @@ class LocalWebBrowserTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn('<log is plain text>',await self.page.locator('#job-log').inner_text())
         self.assertEqual(await self.page.locator('#job-log log').count(),0)
 
+    async def test_all_three_job_searches_match_identity_and_logs_keep_streaming(self):
+        from playwright.async_api import expect
+        await self.page.locator('[data-tabs="jobs"] [data-tab="running"]').click()
+        for query in ('old-job','older','LOCAL'):
+            await self.page.locator('#job-search').fill(query)
+            await expect(self.page.locator('#jobs-table tbody tr')).to_have_count(1)
+        await self.page.locator('#job-search').fill('no match')
+        await expect(self.page.locator('#jobs-table tbody tr')).to_have_count(0)
+        await self.page.locator('[data-tabs="jobs"] [data-tab="temporary"]').click()
+        await self.page.locator('#temporary-search').fill('Partner A')
+        await expect(self.page.locator('#temporary-table tbody tr')).to_have_count(1)
+        await self.page.locator('#temporary-search').fill('no match')
+        await expect(self.page.locator('#temporary-table tbody tr')).to_have_count(0)
+        await self.page.locator('[data-tabs="jobs"] [data-tab="logs"]').click()
+        await self.page.locator('#log-search').fill('temp-failed')
+        await expect(self.page.locator('#log-search-results tbody tr')).to_have_count(1)
+        await self.page.locator('#log-search-results [data-action="job-logs"]').click()
+        await expect(self.page.locator('#log-caption')).to_contain_text('temp-failed')
+        self.fixture.fake.log_lines.append('New live stock log line')
+        await expect(self.page.locator('#job-log')).to_contain_text('New live stock log line')
+        self.assertEqual(self.errors,[])
+
+    async def test_stock_failure_opens_previous_job_log_even_after_job_is_detached(self):
+        from playwright.async_api import expect
+        self.fixture.fake.stock_rows[0].update(status='failed',last_job_id='failed-bean-job',batch_id='stock-batch')
+        await self.page.locator('[data-tabs="mochi-workspace"] [data-tab="inventory"]').click()
+        await self.page.locator('[data-stock-log="failed-bean-job"]').click()
+        await expect(self.page.locator('#log-caption')).to_contain_text('failed-bean-job')
+        await self.page.locator('[data-tabs="mochi-workspace"] [data-tab="inventory"]').click()
+        await self.page.locator('[data-stock-log="stock-batch"]').click()
+        await expect(self.page.locator('#log-caption')).to_contain_text('stock-batch')
+        self.assertEqual(self.errors,[])
+
     async def test_broadcast_selects_only_checked_person_and_never_sends_empty(self):
         await self.nav('telegram')
         await self.page.locator('#broadcast-mode').select_option('custom')

@@ -13,6 +13,7 @@ from core.platforms.mochichat.stock_creation import purchase_stock_batch
 from core.mail.providers.priority import MULTI_SHOP, GMAILVIP, ONE_TRIEU, parse_mail_priority
 from core.proxy.protocol import ProxyReleaseOutcome
 from gui.background import AsyncTaskThread
+from core.platforms.mochichat.account_lookup import AccountLookupError
 
 
 class StockController(QObject):
@@ -28,7 +29,9 @@ class StockController(QObject):
         self.phase=None
         self.closing = False
         self.last_error = ''
-        self.log_line.connect(lambda jid, line:self.m._append_log_line(line, job_id=jid))
+        self._reported_tick_error=None
+        self.log_line.connect(lambda jid, line:self.m._append_log_line(
+            f'[{datetime.now(VIETNAM_TIME):%H:%M:%S}] [{jid}] {line}', job_id=jid))
         self.timer = QTimer(self)
         self.timer.timeout.connect(self.tick)
         self.timer.start(2000)
@@ -111,8 +114,11 @@ class StockController(QObject):
             if pending:
                 self._login(pending)
                 return
-        except Exception:
-            self.last_error = 'Chưa xử lý được kho acc; kiểm tra cấu hình và dữ liệu VPS.'
+        except Exception as exc:
+            self.last_error = 'Chưa xử lý được kho acc ('+type(exc).__name__+'); kiểm tra cấu hình và dữ liệu VPS.'
+            if self._reported_tick_error!=self.last_error:
+                self._reported_tick_error=self.last_error
+                for batch in self.store.batches()[:1]:self.log_line.emit(batch['id'],self.last_error)
 
     def _buy(self, batch):
         owner=self.t.store.get_user(batch['owner'])
@@ -129,6 +135,15 @@ class StockController(QObject):
             self.t.store.record_job(batch['id'], batch['owner'], 'STOCK_CREATE', 1,
                 0, sale_rate_units=0)
         async def execute():
+            self.log_line.emit(batch['id'], f'Bắt đầu mua {batch["count"]} mail tạo acc; shop {provider}.')
+            try:
+                await purchase()
+            except Exception as exc:
+                self.log_line.emit(batch['id'], 'Lỗi mua/lưu mail tạo acc: '+type(exc).__name__+
+                    '. Chưa xác nhận giao dịch; đối soát trước khi mua lại.')
+                raise
+            self.log_line.emit(batch['id'], 'Đã lưu lô mail; chuyển sang tạo/đăng nhập từng acc.')
+        async def purchase():
             await purchase_stock_batch(self.store, batch, provider=provider, keys=keys,
                 purchase_sink=self.t.store.record_purchase, mail_pool=pool,
                 directory=self.store.path.parent/'mail_batches',
@@ -149,16 +164,29 @@ class StockController(QObject):
             lease = None
             outcome = ProxyReleaseOutcome.BUSINESS_FAILURE
             try:
+                self.log_line.emit(row['batch_id'], f'Acc #{row["id"]}: bắt đầu tạo/đăng nhập.')
                 if client is not None:
+                    self.log_line.emit(row['batch_id'], f'Acc #{row["id"]}: chờ cấp proxy.')
                     lease = await client.lease(owner)
                 profile = await lookup_account(row['email'], row['password'], owner_id=owner,
-                    proxy=lease.proxy if lease else None, **options)
+                    proxy=lease.proxy if lease else None,
+                    on_progress=lambda message:self.log_line.emit(row['batch_id'],f'Acc #{row["id"]}: {message}'), **options)
                 self.store.update(row['id'], invite_code=profile.invite_code, beans=profile.beans,
                     status='waiting' if row['infinite'] or Decimal(profile.beans)<row['target'] else 'ready',
                     message='Đã tạo acc, lấy mã mời và số dư bean.')
                 outcome = ProxyReleaseOutcome.SUCCESS
+                self.log_line.emit(row['batch_id'], f'Acc #{row["id"]}: đã lấy mã mời {profile.invite_code}; số dư {profile.beans} bean.')
             except asyncio.CancelledError:
+                self.log_line.emit(row['batch_id'],f'Acc #{row["id"]}: tạm dừng tạo acc, giữ mail để tiếp tục.')
                 self.store.update(row['id'], status='creating', message='Chờ tạo tiếp sau khi khởi động lại VPS.')
+                raise
+            except Exception as exc:
+                # AccountLookupError has controlled public messages; never log raw HTTP/Google exceptions.
+                detail=str(exc) if isinstance(exc,AccountLookupError) else type(exc).__name__
+                detail=detail.replace(row['password'],'[ẩn]') if row['password'] else detail
+                detail=('Lỗi kết nối/proxy. ' if getattr(exc,'transport_error',False) else '')+detail
+                self.log_line.emit(row['batch_id'],f'Acc #{row["id"]}: thất bại — {detail}')
+                self.store.update(row['id'],message=detail[:1000])
                 raise
             finally:
                 if client is not None:
@@ -166,7 +194,7 @@ class StockController(QObject):
                         await client.release(lease, outcome=outcome, success=outcome==ProxyReleaseOutcome.SUCCESS)
                     await client.release_job()
         def failed():
-            self.store.update(row['id'], status='creation_failed', message='Không đăng nhập/lấy mã được. Sửa kết nối rồi bấm Thử tạo lại lô; không mua mail mới.')
+            self.store.update(row['id'], status='creation_failed')
             self._finish_batch(row['batch_id'])
         self.phase='login'
         def stopped():
@@ -187,6 +215,7 @@ class StockController(QObject):
         success = sum(bool(r['invite_code']) for r in rows)
         state = 'completed' if success==batch['count'] else 'partial'
         self.store.batch_update(bid, state, f'Đã tạo {success}/{batch["count"]} acc. Mail lỗi được giữ nội bộ để thử tạo lại, không mua lại.')
+        self.log_line.emit(bid,f'Kết thúc lô: tạo được {success}/{batch["count"]} acc. Mail lỗi được giữ để thử lại.')
         self.t.store.finish_job(bid, 'completed' if state=='completed' else 'failed', 0,
             failure_count=max(0,len(rows)-success), attempted_count=len(rows))
 
@@ -223,12 +252,16 @@ class StockController(QObject):
         prior = m.chk_use_mail_batch.isChecked()
         m.chk_use_mail_batch.setChecked(False)
         try:
+            creator=self.t.store.get_user(row['owner'])
             jid = m._on_start_clicked(code=row['invite_code'], points=points,
                 customer_name='Kho acc #'+str(row['id']), before_start=register,
-                creator_name='Kho tài khoản', creator_chat_id=row['owner'] if row['owner']>0 else None,
+                creator_name=creator.name if creator else 'Kho tài khoản', creator_chat_id=row['owner'] if row['owner']>0 else None,
                 combo=True, mail_product_ids=row['product_ids'])
             if not jid:
                 self.store.update(row['id'], status='failed', message=m.validation_label.text() or 'Chưa tạo được job tích bean.')
+                self.log_line.emit(row['batch_id'],f'Acc #{row["id"]}: chưa tạo được job tích bean — '+(m.validation_label.text() or 'Kiểm tra cấu hình.'))
+            else:
+                self.log_line.emit(row['batch_id'],f'Acc #{row["id"]}: job tích bean {jid}, mã mời {row["invite_code"]}, mục tiêu đợt {points} bean.')
         finally:
             m.chk_use_mail_batch.setChecked(prior)
 
@@ -285,6 +318,16 @@ class StockController(QObject):
 
     def list(self, offset=0):
         rows = self.store.all()
+        # Recover links for accounts whose terminal job was detached by an older build.
+        missing={r['id'] for r in rows if not r.get('job_id') and not r.get('last_job_id')}
+        if missing:
+            import json
+            with self.t.store._connection() as db:
+                for job in db.execute("SELECT job_id,schedule_data FROM jobs WHERE schedule_data LIKE '%stock_account_id%' ORDER BY created_at DESC,job_id DESC"):
+                    aid=json.loads(job['schedule_data'] or '{}').get('stock_account_id')
+                    if aid in missing:
+                        next(r for r in rows if r['id']==aid)['last_job_id']=job['job_id'];missing.remove(aid)
+                    if not missing:break
         return dict(self.store.summary(), rows=rows[offset:offset+100], batches=self.store.batches(),
             exports=self.store.exports(), offset=offset, busy=self.worker is not None, error=self.last_error)
 

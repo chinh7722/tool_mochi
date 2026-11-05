@@ -1,5 +1,27 @@
 # Biên Bản Giao Ca & Nhật Ký Phát Triển Dự Án (Giao_ca.md)
 
+## 05/11/2026 — Log kho tích bean và tìm kiếm job
+
+- Kho acc tool/web có Log tích bean, Log tạo acc; cả lô chưa tạo được acc vẫn có nút log.
+  StockAccountStore thêm last_job_id, giữ sau terminal; controller khôi phục liên kết
+  legacy từ metadata stock_account_id. Không sửa tiến độ, không tự chạy lại job lỗi.
+- Tạo acc ghi mốc mua/lưu mail, proxy, Google/Mochi, mã mời/bean, chuyển job và lỗi.
+  Chỉ ghi thông báo AccountLookupError được kiểm soát hoặc tên loại ngoại lệ; không raw
+  Google/shop HTTP body, password/API. Lookup giữ mã chẩn đoán HTTPS/mạng đã biết.
+- core/job_search.py chuẩn hóa hoa/thường, dấu Việt và tìm literal bằng instr với
+  bound parameters. history.temporary có query, lọc trước pagination; job.search là
+  read-only, danh mục toàn bộ job gồm job đã ẩn khỏi lịch sử tạm. Không trả schedule_data/key.
+- Tool/web có ba thanh tìm kiếm độc lập: job trong phiên; danh mục chọn log; lịch sử tạm.
+  Chặn response cũ khi đổi query. Chọn log vẫn stream theo cursor/epoch mỗi giây.
+- Xác minh read-only VPS: một acc failed do mail thử mã mời chưa xác nhận giao dịch an toàn.
+  Log cũ vẫn còn; không tự mua lại hay sửa giao dịch đang cần đối soát.
+- Hướng dẫn: LOG_TICH_BEAN_VA_TIM_KIEM_JOB_2026-11-05.md. Đồng bộ core/gui với src.
+- QA: 251 ca liên quan đã qua trên Windows và Ubuntu: search6, kho42, desktop9,
+  pricing/history/log16, lookup37, priority24, classic16, sync12, remote30,
+  statistics13, web server13, Chromium33. Linux browser cần quyền đọc thư mục Chromium
+  /var/lib/hoshino/browsers; lần chạy root1 thiếu quyền đã chạy lại bằng root và qua.
+  Có test mở lại cùng job khi request log cũ còn chờ, tránh mất phần đầu log.
+
 ## 05/11/2026 — SSH key, API được trùng và ưu tiên job khách
 
 - API mua mail tạo acc được phép trùng giá trị API nhập mã mời. Tách vị trí

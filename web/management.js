@@ -9,7 +9,7 @@ export function quotedUnits(points,settings) {
   return settings?.sale_rate?priceUnits(settings.sale_rate)*count:null;
 }
 export function installManagement({$,app,api,command,esc,money,n,time,table,toast,controls,logs}) {
-  let prices=[],dirty=false,offset=0,total=0,busy=false;
+  let prices=[],dirty=false,offset=0,total=0,busy=false,pending=false,searchVersion=0;
   function priceRows() {
     prices.sort((a,b)=>a.beans-b.beans);
     table('prices-table',prices,[['Mốc bean',r=>n(r.beans)],['Giá bán (VND)',r=>esc(money(r.price_units))],['Thao tác',r=>`<button data-price-edit="${r.beans}">Sửa</button> <button data-price-remove="${r.beans}">Xóa mốc</button>`]]);
@@ -28,15 +28,17 @@ export function installManagement({$,app,api,command,esc,money,n,time,table,toas
   });
   $('prices-save').addEventListener('click',()=>command('pricing.save',{prices},r=>{prices=r.prices;dirty=false;priceRows();$('prices-status').textContent=r.message;}));
   async function loadTemporary() {
-    if(!app.connected||busy||app.busy)return;busy=true;const start=offset,generation=app.generation;
-    try {const response=await api('/api/command',{action:'history.temporary',payload:{offset:start},request_id:crypto.randomUUID()});if(generation!==app.generation)return;
+    if(!app.connected||app.busy)return;if(busy){pending=true;return;}busy=true;const start=offset,generation=app.generation,version=searchVersion;
+    try {const response=await api('/api/command',{action:'history.temporary',payload:{offset:start,query:$('temporary-search').value},request_id:crypto.randomUUID()});if(generation!==app.generation||version!==searchVersion)return;
       const r=response.result;total=r.total;
       table('temporary-table',r.rows,[['Mã job','job_id'],['Người tạo',r=>esc(r.name)+' ('+esc(r.chat_id)+')'],['Mã mời','code'],['Trạng thái',r=>esc(({failed:'Thất bại',completed:'Hoàn thành',cancelled:'Đã hủy'})[r.status]||r.status)],['Bean',r=>n(r.success_count*100)],['Kết thúc',r=>esc(time(r.finalized_at))],['Thao tác',r=>`<button data-action="job-logs" data-id="${esc(r.job_id)}">Log</button> <button data-action="job-continue" data-id="${esc(r.job_id)}" data-mutation ${r.can_continue?'':'data-allowed="false"'}>Tiếp tục</button>`]]);
       $('temporary-pagination').textContent=`${Math.min(start+1,total)}–${Math.min(start+100,total)} / ${total}`;
       $('temporary-prev').disabled=start===0;$('temporary-next').disabled=start+100>=total;controls();
       if(start&&!r.rows.length){offset=Math.max(0,start-100);setTimeout(loadTemporary,0);}
-    } catch(error){$('temporary-pagination').textContent=error.message;} finally {busy=false;}
+    } catch(error){$('temporary-pagination').textContent=error.message;} finally {busy=false;if(pending){pending=false;setTimeout(loadTemporary,0);}}
   }
+  let searchTimer;
+  $('temporary-search').addEventListener('input',()=>{offset=0;searchVersion++;clearTimeout(searchTimer);searchTimer=setTimeout(loadTemporary,250);});
   $('temporary-refresh').addEventListener('click',loadTemporary);
   $('temporary-prev').addEventListener('click',()=>{offset=Math.max(0,offset-100);loadTemporary();});
   $('temporary-next').addEventListener('click',()=>{if(offset+100<total){offset+=100;loadTemporary();}});

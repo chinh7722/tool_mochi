@@ -1,6 +1,6 @@
 const labels={waiting:'Chờ tích bean',priority_wait:'Tạm dừng ưu tiên khách',accumulating:'Đang tích bean',ready:'Đủ bean',stopping:'Đang dừng',paused:'Đã dừng',failed:'Lỗi tích bean',exporting:'Đang xuất',queued:'Chờ mua mail',buying:'Đang mua mail',creating:'Đang tạo acc',uncertain:'Cần đối soát',partial:'Có acc lỗi',completed:'Hoàn tất',pending:'Chưa đóng phiếu'};
 
-export function installStock({$,app,api,command,esc,n,time,table,toast,controls}) {
+export function installStock({$,app,api,command,esc,n,time,table,toast,controls,logs}) {
   let offset=0,exportOffset=0,total=0,busy=false,rows=[],selected=new Set(),exportRecord=null,signature='',pendingFinish='';
   const inventory=document.querySelector('[data-panel="mochi-workspace:inventory"]');
   const form=$('stock-form');
@@ -31,10 +31,13 @@ export function installStock({$,app,api,command,esc,n,time,table,toast,controls}
       table('stock-table',rows,[['Chọn',r=>`<input type="checkbox" aria-label="Chọn acc ${r.id}" data-stock-check="${r.id}" ${selected.has(r.id)?'checked':''}>`],
         ['STT','id'],['Email','email'],['Mật khẩu','password'],['Bean','beans'],['Mục tiêu',r=>r.infinite?'Vô hạn':n(r.target)],
         ['Mã mời','invite_code'],['Trạng thái',r=>esc(labels[r.status]||r.status)],
-        ['Thao tác',r=>`<button data-stock-stop="${r.id}" data-mutation>Dừng nhập mã</button>`]]);
+        ['Chi tiết','message'],['Thao tác',r=>`<button data-stock-stop="${r.id}" data-mutation>Dừng nhập mã</button> `+
+          ((r.job_id||r.last_job_id)?`<button data-stock-log="${esc(r.job_id||r.last_job_id)}">Log tích bean</button> `:'')+
+          (r.batch_id?`<button data-stock-log="${esc(r.batch_id)}">Log tạo acc</button>`:'')]]);
     }
     table('stock-batches',result.batches,[['Mã lô','id'],['Số acc','count'],['Trạng thái',r=>esc(labels[r.state]||r.state)],['Chi tiết','message'],
-      ['Thử lại',r=>r.state==='partial'?`<button data-stock-retry="${esc(r.id)}" data-mutation>Thử tạo lại từ mail đã mua</button>`:'']]);
+      ['Thử lại',r=>r.state==='partial'?`<button data-stock-retry="${esc(r.id)}" data-mutation>Thử tạo lại từ mail đã mua</button>`:''],
+      ['Log',r=>`<button data-stock-log="${esc(r.id)}">Log tạo acc</button>`]]);
     controls();
   }
   function renderExports(result) {
@@ -81,7 +84,8 @@ export function installStock({$,app,api,command,esc,n,time,table,toast,controls}
   inventory.addEventListener('click',async e=>{
     try {
       const button=e.target.closest('button');if(!button)return;
-      if(button.dataset.stockStop){if(confirm('Bạn có muốn dừng nhập mã cho acc này không?'))await command('stock.stop',{ids:[Number(button.dataset.stockStop)]});}
+      if(button.dataset.stockLog){await logs(button.dataset.stockLog);return;}
+      else if(button.dataset.stockStop){if(confirm('Bạn có muốn dừng nhập mã cho acc này không?'))await command('stock.stop',{ids:[Number(button.dataset.stockStop)]});}
       else if(button.dataset.stockRetry)await command('stock.retry',{batch_id:button.dataset.stockRetry});
       else if(button.dataset.stockShow){showExport(await read('stock.export.get',{export_id:button.dataset.stockShow}));return;}
       else switch(button.id) {

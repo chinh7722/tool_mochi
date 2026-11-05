@@ -261,6 +261,38 @@ class StockControllerTests(unittest.TestCase):
         self.controller.resume([row['id']]);self.controller._dispatch(self.store.all()[0])
         self.assertEqual(self.t.store.get_job(self.store.all()[0]['job_id']).target_count,12)
 
+    def test_terminal_job_keeps_log_link_and_legacy_missing_link_is_recovered(self):
+        row=self.account();self.controller._dispatch(row);jid=self.store.all()[0]['job_id']
+        self.t.store.finish_job(jid,'failed',2);self.controller._sync_jobs()
+        result=self.controller.list()['rows'][0]
+        self.assertIsNone(result['job_id']);self.assertEqual(result['last_job_id'],jid)
+        with self.store.connection() as db:db.execute('UPDATE stock_accounts SET last_job_id=NULL')
+        self.assertEqual(self.controller.list()['rows'][0]['last_job_id'],jid)
+
+    def test_login_failure_records_safe_progress_reason_and_never_password(self):
+        from core.platforms.mochichat.account_lookup import AccountLookupError
+        bid=self.store.create_batch(1,2500,False,'123');batch=self.store.batches()[0]
+        self.store.save_delivery(batch,[SimpleNamespace(username='fake@example.com',password='private-test-password')])
+        self.t.store.record_local_job(bid,'STOCK_CREATE',1,0,sale_rate_units=0)
+        row=self.store.all(internal=True)[0]
+        async def lookup(*_args,**kw):
+            kw['on_progress']('Đang đăng nhập Google…')
+            raise AccountLookupError('Không kết nối được Mochi.',transport_error=True)
+        with patch('gui.stock_controller.lookup_account',new=lookup):
+            self.controller._login(row);deadline=time.monotonic()+5
+            while self.controller.worker is not None and time.monotonic()<deadline:self.app.processEvents();time.sleep(.01)
+        self.assertIsNone(self.controller.worker)
+        logs='\n'.join(self.m._job_logs[bid])
+        self.assertIn('Đang đăng nhập Google',logs);self.assertIn('Không kết nối được Mochi',logs)
+        self.assertIn('Lỗi kết nối/proxy',logs);self.assertNotIn('private-test-password',logs)
+        self.assertEqual(self.store.all(internal=True)[0]['status'],'creation_failed')
+
+    def test_local_batch_log_can_open_even_before_an_invite_job_exists(self):
+        self.m._append_log_line('Test creation log',job_id='stock_batch_test')
+        self.m.show_job_logs('stock_batch_test')
+        self.assertEqual(self.m._selected_job_id,'stock_batch_test')
+        self.assertIn('Test creation log',self.m.txt_log.toPlainText())
+
     def test_generic_continue_cannot_restart_a_stock_account_after_its_job_failed(self):
         row=self.account();self.controller._dispatch(row);jid=self.store.all()[0]['job_id']
         self.t.store.finish_job(jid,'failed',3);self.controller._sync_jobs()

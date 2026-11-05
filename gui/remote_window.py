@@ -260,6 +260,7 @@ class RemoteMainWindow(QMainWindow):
         if not isinstance(job_id,str) or not job_id:
             return
         self._pending_focus_job_id=job_id
+        self.job_search.clear()
         self.activate(1)
         self.workspace_tabs.setCurrentIndex(0)
         self.mochi_tabs.setCurrentIndex(1)
@@ -538,6 +539,7 @@ class RemoteMainWindow(QMainWindow):
         if not job_id:
             return
         self._log_job_id=job_id
+        self._log_revision=getattr(self,'_log_revision',0)+1
         self._log_cursor=None;self._log_epoch=None
         self.job_log_filter.setText('Job: '+job_id+' · Tự cập nhật mỗi giây')
         self.logs.clear()
@@ -548,10 +550,10 @@ class RemoteMainWindow(QMainWindow):
         if (not self.client or not self._connected or self._closing or self._log_polling or
                 not self._log_job_id or self.pages.currentIndex()!=1 or self.mochi_tabs.currentIndex()!=2):return
         self._log_polling=True
-        jid=self._log_job_id;client=self.client
+        jid=self._log_job_id;client=self.client;revision=getattr(self,'_log_revision',0)
         payload=dict(job_id=jid,cursor=self._log_cursor,epoch=self._log_epoch)
         def display(response):
-            if jid!=self._log_job_id or client is not self.client:return
+            if jid!=self._log_job_id or client is not self.client or revision!=getattr(self,'_log_revision',0):return
             result=response['result']
             scroll=self.logs.verticalScrollBar();at_end=scroll.value()>=scroll.maximum()-4
             if result.get('reset'):self.logs.clear()
@@ -675,7 +677,8 @@ class RemoteMainWindow(QMainWindow):
         fill(self.dashboard_jobs,recent,['customer_display','invite_code','progress','beans_actual','status','time_display'],identity_key='job_id')
         self.dashboard_empty.setVisible(not recent)
         at_top=self.jobs.verticalScrollBar().value()<=1
-        display=ordered_jobs(display)
+        from core.job_search import matches_job
+        display=ordered_jobs([r for r in display if matches_job(r,self.job_search.text())])
         for old_row in range(self.jobs.rowCount()):
             cell=self.jobs.cellWidget(old_row,7)
             if cell is not None:

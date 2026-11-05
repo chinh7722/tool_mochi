@@ -1,5 +1,9 @@
 # hoshino-tool — Mochi Chat, Proxy Pool & Telegram
 
+> **[Log tích bean và tìm kiếm job](LOG_TICH_BEAN_VA_TIM_KIEM_JOB_2026-11-05.md):** kho acc
+> có nút Log tích bean/Log tạo acc; ba phần Job đang chạy, Log job và Lịch sử tạm
+> có tìm kiếm theo mã mời, mã job, người tạo hoặc Chat ID trên tool và web local.
+
 > **[SSH key và ưu tiên job khách](KET_NOI_SSH_VA_UU_TIEN_KHACH_2026-11-05.md):**
 > mở **Mo_Quan_Ly_Ket_Noi_VPS.bat** để quản lý kết nối, lưu SSH key và mở tunnel.
 > Job nạp bean cho khách ưu tiên trước kho acc; kho tự tạm dừng và tiếp tục cùng

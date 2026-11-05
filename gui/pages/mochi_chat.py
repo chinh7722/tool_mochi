@@ -1325,8 +1325,7 @@ class MochiChatPage(QWidget):
             widget.setText(str(self.settings.value(f"ui/mochi_draft/{key}", default) or ""))
 
     def show_job_logs(self, job_id):
-        if job_id in self._session_jobs:
-            self._select_job(job_id)
+        self._select_job(job_id)
         self.workspace_tabs.setCurrentIndex(0)
         self.job_tabs.setCurrentIndex(2)
 

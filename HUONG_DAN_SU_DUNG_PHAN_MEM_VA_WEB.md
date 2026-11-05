@@ -1,5 +1,9 @@
 # Hướng dẫn sử dụng Hoshino Tool — Phần mềm và web local
 
+> **[Log tích bean và tìm kiếm job](LOG_TICH_BEAN_VA_TIM_KIEM_JOB_2026-11-05.md):**
+> mở Log tích bean/Log tạo acc ngay trong kho; tìm theo mã mời, mã job, tên người
+> tạo hoặc Chat ID trong Job đang chạy, Log job và Lịch sử tạm.
+
 > **[Quản lý kết nối SSH và ưu tiên khách](KET_NOI_SSH_VA_UU_TIEN_KHACH_2026-11-05.md):**
 > file mới **Mo_Quan_Ly_Ket_Noi_VPS.bat** lưu hồ sơ/SSH key và mở tunnel bằng
 > giao diện. Job tích bean kho tự nhường job khách và chạy tiếp khi hết job khách.

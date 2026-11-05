@@ -46,9 +46,10 @@ class StockCreateForm(QWidget):
 
 
 class StockInventoryPanel(QWidget):
-    def __init__(self, command, loader, parent=None):
+    def __init__(self, command, loader, parent=None, *, open_logs=None):
         super().__init__(parent)
         self.command,self.loader = command,loader
+        self.open_logs=open_logs
         self.offset=0;self.export_offset=0;self.busy=False;self.selected=set();self.rows=[];self.signature=None
         layout=QVBoxLayout(self)
         self.summary=QLabel('Kho tài khoản đã tạo · Chưa tải dữ liệu.');layout.addWidget(self.summary)
@@ -60,15 +61,16 @@ class StockInventoryPanel(QWidget):
             button=QPushButton(title);button.clicked.connect(callback);actions.addWidget(button)
         layout.addLayout(actions)
         self.tabs=QTabWidget();layout.addWidget(self.tabs,1)
-        self.table=self._table(['Chọn','STT','Email','Mật khẩu','Bean','Mục tiêu','Mã mời','Trạng thái','Dừng nhập mã'])
+        self.table=self._table(['Chọn','STT','Email','Mật khẩu','Bean','Mục tiêu','Mã mời','Trạng thái','Dừng nhập mã','Log','Chi tiết'])
         for column,width in enumerate((38,45,165,125,70,75,75,100,90)):self.table.setColumnWidth(column,width)
+        self.table.setColumnWidth(9,245);self.table.setColumnWidth(10,250)
         self.table.setStyleSheet('QTableView::indicator {width:15px;height:15px;border:1px solid #8293b0;border-radius:3px;background:#20232b;} '
             'QTableView::indicator:checked {background:#3b82f6;border-color:#93c5fd;}')
         self.table.itemChanged.connect(self.check_changed)
         self.tabs.addTab(self.table,'Tài khoản')
         self.history=self._table(['Phiếu xuất','Số acc','Người xuất','Trạng thái','Ngày xuất','Xem'])
         self.tabs.addTab(self.history,'Lịch sử xuất acc')
-        self.batches=self._table(['Mã lô','Số acc','Trạng thái','Chi tiết','Thử tạo lại'])
+        self.batches=self._table(['Mã lô','Số acc','Trạng thái','Chi tiết','Thử tạo lại','Log tạo acc'])
         self.tabs.addTab(self.batches,'Tiến độ tạo acc')
         paging=QHBoxLayout()
         previous=QPushButton('Trang trước');previous.clicked.connect(lambda:self.move(-1));paging.addWidget(previous)
@@ -116,6 +118,12 @@ class StockInventoryPanel(QWidget):
             button.setEnabled(row['status'] not in ('paused','exporting'))
             button.clicked.connect(lambda _checked=False,i=row['id']:self.stop_ids([i]))
             self.table.setCellWidget(index,8,button)
+            actions=QWidget();action_box=QHBoxLayout(actions);action_box.setContentsMargins(0,0,0,0)
+            for caption,jid in [('Log tích bean',row.get('job_id') or row.get('last_job_id')),('Log tạo acc',row.get('batch_id'))]:
+                log=QPushButton(caption);log.setEnabled(bool(jid and self.open_logs))
+                log.clicked.connect(lambda _c=False,j=jid:self.open_logs(j));action_box.addWidget(log)
+            self.table.setCellWidget(index,9,actions)
+            detail=QTableWidgetItem(row.get('message',''));detail.setToolTip(detail.text());self.table.setItem(index,10,detail)
         self.table.blockSignals(False)
         self.render_history(r['exports'])
         self.batches.setRowCount(len(r['batches']))
@@ -125,6 +133,8 @@ class StockInventoryPanel(QWidget):
             button=QPushButton('Thử tạo lại');button.setEnabled(row['state']=='partial')
             button.clicked.connect(lambda _c=False,i=row['id']:self.command('stock.retry',{'batch_id':i},lambda _r:self.load()))
             self.batches.setCellWidget(index,4,button)
+            log=QPushButton('Log tạo acc');log.setEnabled(self.open_logs is not None)
+            log.clicked.connect(lambda _c=False,j=row['id']:self.open_logs(j));self.batches.setCellWidget(index,5,log)
         if self.offset and not self.rows:self.offset=max(0,self.offset-100)
 
     def render_history(self,rows):
@@ -200,7 +210,7 @@ def install_local_stock(m):
     for index in range(box.count()):
         widget=box.itemAt(index).widget()
         if widget:widget.hide()
-    m.stock_inventory_panel=StockInventoryPanel(command,loader,m.inventory_page)
+    m.stock_inventory_panel=StockInventoryPanel(command,loader,m.inventory_page,open_logs=m.show_job_logs)
     box.addWidget(m.stock_inventory_panel,1)
     m.stock_create_panel=StockCreateForm(command,lambda:m.input_pids.text(),m)
     m.card_stock.setEnabled(True)
@@ -231,4 +241,4 @@ def remote_inventory(window):
             else:on_error()
         worker=window.task(lambda:client.command(action,payload),result)
         worker.error.connect(lambda _e:on_error())
-    return StockInventoryPanel(lambda a,p,c=None:window.send(a,p,c),loader,window)
+    return StockInventoryPanel(lambda a,p,c=None:window.send(a,p,c),loader,window,open_logs=window.open_job_logs)

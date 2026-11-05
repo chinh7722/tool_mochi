@@ -238,7 +238,15 @@ async def lookup_account(email,password,*,owner_id,proxy=None,google_via_proxy=F
             google_login_via_proxy=google_via_proxy,on_step=login_step)
         if not isinstance(result,dict) or result.get('ok') is not True:
             transport=isinstance(result,dict) and bool(result.get('transport_error'))
-            raise AccountLookupError('Không đăng nhập được Google/Mochi; kiểm tra tài khoản và kết nối.',
+            # Publish only known diagnostic codes, never raw responses containing tokens/URLs.
+            codes={'TLS_CERTIFICATE_ERROR':'Chứng chỉ HTTPS không hợp lệ',
+                'REQUEST_FAILED':'Request đăng nhập bị lỗi','PROXY_RECOVERY_FAILED':'Khôi phục proxy thất bại',
+                'TRANSPORT_ERROR':'Lỗi kết nối mạng/proxy','NETWORK_ERROR':'Lỗi kết nối mạng/proxy'}
+            code=result.get('code') if isinstance(result,dict) else None
+            detail=(' '+codes[code]+' ['+code+'].' if isinstance(code,str) and code in codes else '')
+            if isinstance(result,dict) and result.get('error')=='Google từ chối xác thực hoặc không cấp ID Token cho Mochi Chat.':
+                detail=' Google không cấp ID Token; kiểm tra thông tin đăng nhập hoặc yêu cầu xác minh Google.'
+            raise AccountLookupError('Không đăng nhập được Google/Mochi; kiểm tra tài khoản và kết nối.'+detail,
                 transport_error=transport)
         progress('Đang lấy tên hiển thị và số dư beans…')
         me=await fetcher.get_own_user_me()

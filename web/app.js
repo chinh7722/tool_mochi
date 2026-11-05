@@ -64,9 +64,11 @@ function controls() {
   quote();
 }
 function orderedJobs() {return [...(app.state?.jobs || [])].sort((a,b)=>(!terminal.has(b.status))-(!terminal.has(a.status)) || (Date.parse(b.created_at)||0)-(Date.parse(a.created_at)||0));}
+const normalizeSearch=v=>String(v??'').toLocaleLowerCase('vi').normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/đ/g,'d');
 function progress(row) {const done=Number(row.success_count||0), total=Number(row.target_count||0), percent=total?Math.min(100,done/total*100):0; return `<div class="progress">${n(done)} / ${n(total)}<div class="progress-bar"><span data-progress="${percent}"></span></div></div>`;}
 function renderJobs() {
-  const s=app.state, rows=orderedJobs();
+  const s=app.state, query=normalizeSearch($('job-search').value.trim()), rows=orderedJobs().filter(r=>
+    [r.job_id,r.invite_code,r.creator_name,r.creator_chat_id].some(v=>normalizeSearch(v).includes(query)));
   $('job-queue').textContent=`Đang xử lý: ${s.active_jobs} / ${s.job_limit} job · Đang chờ: ${s.queued_jobs} · Hẹn giờ / Combo: ${s.scheduled_jobs}`;
   $('job-sync').textContent=`Đã đồng bộ ${rows.length} job · Job đang xử lý và job mới hiển thị trước.`;
   table('jobs-table',rows,[['Tên khách / Job',r=>esc(r.customer_name || r.job_id)+(r.combo?' <span class="badge">Combo</span>':'')],['Mã mời','invite_code'],['Tiến độ',progress],['Trạng thái',r=>badge(r.status)],['Bean',r=>n(r.success_count*100)+' / '+n(r.target_count*100)],['Người tạo','creator_name'],['Thời gian',r=>esc((r.combo&&r.status==='Chờ lượt combo'?'Tiếp: ':'')+time(r.scheduled_at || r.created_at))],['Thao tác',r=>button('Log','job-logs',r.job_id)+button('Dừng','job-stop',r.job_id,terminal.has(r.status)?'data-allowed="false"':'')+button('Tiếp tục','job-continue',r.job_id,r.can_continue?'':'data-allowed="false"')]],{key:'job_id',select:'jobs'});
@@ -174,13 +176,29 @@ function showUserReport(result, expectedOwner) {
   dialog('Báo cáo chi tiết theo người dùng',body);
 }
 function csv(rows, keys) {const cell=value=>{let s=String(value ?? ''); if(/^[=+\-@\t\r]/.test(s)) s="'"+s; return '"'+s.replace(/"/g,'""')+'"';}; return '\ufeff'+[keys,...rows.map(r=>keys.map(k=>r[k]))].map(row=>row.map(cell).join(',')).join('\r\n');}
-let logCursor=null,logEpoch=null,logBusy=false;
-async function logs(jobId) {if(!jobId) throw Error('Chọn Log trên một job trước.');app.logJob=jobId;logCursor=null;logEpoch=null;$('job-log').textContent='';$('log-caption').textContent='Job: '+jobId+' · Tự cập nhật mỗi giây';page('mochi');tab('mochi-workspace','tasks');tab('jobs','logs');await pollLogs();}
+let logCursor=null,logEpoch=null,logBusy=false,logRevision=0;
+let logSearchOffset=0,logSearchTotal=0,logSearchVersion=0,logSearchTimer;
+async function searchLogJobs() {
+  if(!app.connected)return;
+  const version=++logSearchVersion,offset=logSearchOffset,generation=app.generation;
+  try {
+    const response=await api('/api/command',{action:'job.search',payload:{query:$('log-search').value,offset},request_id:crypto.randomUUID()});
+    if(version!==logSearchVersion||generation!==app.generation)return;
+    const r=response.result;logSearchTotal=r.total;
+    table('log-search-results',r.rows,[['Mã job','job_id'],['Mã mời','code'],['Người tạo',r=>esc(r.name)+' ('+esc(r.chat_id)+')'],['Trạng thái',r=>badge(r.status)],['',r=>`<button data-action="job-logs" data-id="${esc(r.job_id)}">Xem log</button>`]]);
+    $('log-search-page').textContent=`${Math.min(offset+1,r.total)}–${Math.min(offset+100,r.total)} / ${r.total} job`;
+    $('log-search-prev').disabled=!offset;$('log-search-next').disabled=offset+100>=r.total;
+  } catch(error){if(version===logSearchVersion)$('log-search-page').textContent=error.message;}
+}
+$('log-search').addEventListener('input',()=>{logSearchOffset=0;logSearchVersion++;clearTimeout(logSearchTimer);logSearchTimer=setTimeout(searchLogJobs,250);});
+$('log-search-prev').addEventListener('click',()=>{logSearchOffset=Math.max(0,logSearchOffset-100);searchLogJobs();});
+$('log-search-next').addEventListener('click',()=>{if(logSearchOffset+100<logSearchTotal){logSearchOffset+=100;searchLogJobs();}});
+async function logs(jobId) {if(!jobId) throw Error('Chọn Log trên một job trước.');logRevision++;app.logJob=jobId;logCursor=null;logEpoch=null;$('job-log').textContent='';$('log-caption').textContent='Job: '+jobId+' · Tự cập nhật mỗi giây';page('mochi');tab('mochi-workspace','tasks');tab('jobs','logs');await pollLogs();}
 async function pollLogs() {
   if(logBusy||!app.connected||!app.logJob||app.page!=='mochi'||document.querySelector('[data-panel="jobs:logs"]').hidden||document.hidden)return;
-  logBusy=true;const jobId=app.logJob,generation=app.generation;
+  logBusy=true;const jobId=app.logJob,generation=app.generation,revision=logRevision;
   try {const response=await api('/api/command',{action:'job.logs',payload:{job_id:jobId,cursor:logCursor,epoch:logEpoch},request_id:crypto.randomUUID()});
-    if(jobId!==app.logJob||generation!==app.generation)return;
+    if(jobId!==app.logJob||generation!==app.generation||revision!==logRevision)return;
     const r=response.result,view=$('job-log'),atEnd=view.scrollTop+view.clientHeight>=view.scrollHeight-12;
     if(r.reset)view.textContent='';const lines=r.lines||[];
     if(lines.length)view.textContent+=(view.textContent?'\n':'')+lines.join('\n');
@@ -194,7 +212,7 @@ function saveDraft() {const f=$('job-form'); localStorage.setItem('hoshino.jobDr
 
 document.addEventListener('click',async event=>{
   const nav=event.target.closest('[data-page]'); if(nav) {event.preventDefault(); page(nav.dataset.page); return;}
-  const tabs=event.target.closest('[data-tab]'); if(tabs) {tab(tabs.closest('[data-tabs]').dataset.tabs,tabs.dataset.tab); if(tabs.dataset.tab==='inventory'&&app.connected) stock.load(); if(tabs.dataset.tab==='running') poll();if(tabs.dataset.tab==='temporary')management.loadTemporary(); return;}
+  const tabs=event.target.closest('[data-tab]'); if(tabs) {tab(tabs.closest('[data-tabs]').dataset.tabs,tabs.dataset.tab); if(tabs.dataset.tab==='inventory'&&app.connected) stock.load(); if(tabs.dataset.tab==='running') poll();if(tabs.dataset.tab==='temporary')management.loadTemporary();if(tabs.dataset.tab==='logs')searchLogJobs(); return;}
   const b=event.target.closest('[data-action]');
   if(b) {event.preventDefault(); if(b.disabled) return; const id=b.dataset.id, pool=b.dataset.pool;
     try {switch(b.dataset.action) {
@@ -204,7 +222,7 @@ document.addEventListener('click',async event=>{
       case 'save-draft': saveDraft(); break;
       case 'job-logs': await logs(id); break;
       case 'job-stop': if(confirm('Bạn có muốn dừng / hủy lịch job '+id+'?')) await command('job.stop',{job_id:id}); break;
-      case 'job-continue': await command('job.continue',{job_id:id},r=>{app.focusJob=r.job_id;page('mochi');tab('mochi-workspace','tasks');tab('jobs','running');}); break;
+      case 'job-continue': await command('job.continue',{job_id:id},r=>{app.focusJob=r.job_id;$('job-search').value='';page('mochi');tab('mochi-workspace','tasks');tab('jobs','running');}); break;
       case 'reload-logs': await logs(app.logJob); break;
       case 'history-export': await command('history.export',{},r=>download('\ufeff'+r.text.replace(/^\ufeff/,''),'job_history.csv','text/csv;charset=utf-8')); break;
       case 'upload-batch': $('batch-file').click(); break;
@@ -253,7 +271,7 @@ document.addEventListener('submit',async event=>{
   event.preventDefault(); const f=event.target;
   try {switch(f.id) {
     case 'connection-form': {if(app.busy) return; app.busy=true; app.generation++; controls(); try {const response=await api('/api/connect',{url:f.url.value.trim(),token:f.token.value.trim()}); f.token.value=''; app.state=response.state; app.connected=true; app.loaded=false; render(); $('connection-config').textContent='Đã lưu kết nối trên máy, dùng chung với phần mềm.'; status('Đã kết nối VPS.'); toast('Đã kết nối VPS.');} finally {app.busy=false; controls();} break;}
-    case 'job-form': {const payload={code:f.code.value.trim(),customer:f.customer.value.trim(),points:Number(f.points.value),batch:$('job-batch').value,combo:f.combo.checked}; if(f.scheduled.checked) {if(!f.scheduled_at.value) throw Error('Chọn ngày giờ chạy theo giờ Việt Nam.'); payload.scheduled_at=f.scheduled_at.value+':00+07:00';} saveDraft(); await command('job.create',payload,r=>{app.focusJob=r.job_id; page('mochi'); tab('mochi-workspace','tasks'); tab('jobs','running');}); break;}
+    case 'job-form': {const payload={code:f.code.value.trim(),customer:f.customer.value.trim(),points:Number(f.points.value),batch:$('job-batch').value,combo:f.combo.checked}; if(f.scheduled.checked) {if(!f.scheduled_at.value) throw Error('Chọn ngày giờ chạy theo giờ Việt Nam.'); payload.scheduled_at=f.scheduled_at.value+':00+07:00';} saveDraft(); await command('job.create',payload,r=>{app.focusJob=r.job_id;$('job-search').value=''; page('mochi'); tab('mochi-workspace','tasks'); tab('jobs','running');}); break;}
     case 'lookup-form': {const payload={email:f.email.value.trim(),password:f.password.value}; f.password.value=''; await command('lookup.start',payload); break;}
     case 'proxy-paste-form': await command('proxy.import',{pool:f.dataset.pool,provider:$('proxy-provider-'+f.dataset.pool).value,text:f.text.value},()=>$('dialog').close()); break;
     case 'bot-form': await command('telegram.save',{token:f.token.value.trim(),auto_start:f.auto_start.checked},()=>{f.token.value='';}); break;
@@ -279,6 +297,7 @@ $('local-address').textContent=location.host; controls();
 async function boot() {try {const bootstrap=new URLSearchParams(location.hash.slice(1)).get('session'); if(bootstrap) {await api('/api/session',{}, {'X-Web-Bootstrap':bootstrap}); history.replaceState(null,'',location.pathname);} const config=await api('/api/config'); app.csrf=config.csrf; field('connection-form','url').value=config.url; $('connection-config').textContent=config.has_token?'Đã có token lưu trên máy; để trống để dùng lại.':'Chưa có token. Nhập token quản lý VPS tại đây.'; await poll(); setInterval(poll,2500);} catch(error) {status(error.message); toast(error.message,true);}}
 const statistics=installStatistics({$,app,api,esc,money,n,time,table,toast,idValue});
 const management=installManagement({$,app,api,command,esc,money,n,time,table,toast,controls,logs});
-const stock=installStock({$,app,api,command,esc,n,time,table,toast,controls});
+const stock=installStock({$,app,api,command,esc,n,time,table,toast,controls,logs});
+$('job-search').addEventListener('input',()=>{if(app.state){renderJobs();controls();}});
 setInterval(pollLogs,1000);
 boot();

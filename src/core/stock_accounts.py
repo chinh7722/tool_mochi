@@ -75,6 +75,9 @@ class StockAccountStore:
                 CREATE TABLE IF NOT EXISTS stock_batch_keys (
                     batch_id TEXT PRIMARY KEY, provider TEXT NOT NULL, keys_json TEXT NOT NULL);
             ''')
+            if 'last_job_id' not in {r[1] for r in db.execute('PRAGMA table_info(stock_accounts)')}:
+                db.execute('ALTER TABLE stock_accounts ADD COLUMN last_job_id TEXT')
+                db.execute('UPDATE stock_accounts SET last_job_id=job_id WHERE job_id IS NOT NULL')
         if os.name != 'nt':
             self.path.chmod(0o600)
 
@@ -165,6 +168,7 @@ class StockAccountStore:
         if not values or set(values) - allowed:
             raise ValueError('Thông tin kho acc không hợp lệ.')
         values['updated_at'] = now()
+        if values.get('job_id'):values['last_job_id']=values['job_id']
         with self.connection() as db:
             db.execute('UPDATE stock_accounts SET ' + ','.join(k+'=?' for k in values) + ' WHERE id=?', (*values.values(), aid))
 

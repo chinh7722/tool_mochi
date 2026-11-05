@@ -207,20 +207,37 @@ class JobStatisticsMixin:
             code_history=code_history[offset:offset+limit],code_total=len(code_history),
             note='Tài chính tính theo ngày kết thúc job; lợi nhuận là phần đã đối soát. Mỗi đợt combo kết thúc tính 1 lượt khách. Không suy đoán các đợt combo cũ chưa được ghi.')
 
-    def temporary_history(self, *, offset=0,limit=100):
+    def temporary_history(self, *, offset=0,limit=100,query=''):
         if type(offset) is not int or offset<0 or type(limit) is not int or not 1<=limit<=500:
             raise ValueError('Phân trang không hợp lệ.')
         with self._connection() as db:
             db.execute('BEGIN')
             clause='FROM jobs j JOIN users u USING(chat_id) WHERE j.finalized_at IS NOT NULL AND NOT EXISTS(SELECT 1 FROM temporary_hidden_jobs h WHERE h.job_id=j.job_id)'
-            total=db.execute('SELECT COUNT(*) '+clause).fetchone()[0]
+            from core.job_search import sql_search
+            extra,params=sql_search(db,query);clause+=extra
+            total=db.execute('SELECT COUNT(*) '+clause,params).fetchone()[0]
             rows=[dict(r) for r in db.execute('''SELECT j.job_id,j.code,j.chat_id,u.name,j.status,j.target_count,
                 j.success_count,j.failure_count,j.created_at,j.finalized_at,j.schedule_data,
                 (j.status='failed' AND j.success_count<j.target_count AND NOT EXISTS(
                     SELECT 1 FROM job_continuations c WHERE c.source_id=j.job_id)) AS can_continue '''+
-                clause+' ORDER BY j.finalized_at DESC,j.job_id LIMIT ? OFFSET ?',(limit,offset))]
+                clause+' ORDER BY j.finalized_at DESC,j.job_id LIMIT ? OFFSET ?',(*params,limit,offset))]
         for row in rows:
             if json.loads(row.pop('schedule_data') or '{}').get('stock_account_id'):row['can_continue']=False
+        return dict(rows=rows,total=total,offset=offset,limit=limit)
+
+    def search_jobs(self,query='',*,offset=0,limit=100):
+        """Log picker includes running, finished and hidden temporary jobs."""
+        if type(offset) is not int or offset<0 or type(limit) is not int or not 1<=limit<=100:
+            raise ValueError('Phân trang không hợp lệ.')
+        from core.job_search import sql_search
+        with self._connection() as db:
+            db.execute('BEGIN')
+            extra,params=sql_search(db,query)
+            clause='FROM jobs j JOIN users u USING(chat_id) WHERE 1=1'+extra
+            total=db.execute('SELECT COUNT(*) '+clause,params).fetchone()[0]
+            rows=[dict(r) for r in db.execute('''SELECT j.job_id,j.code,j.chat_id,u.name,
+                j.status,j.created_at,j.finalized_at '''+clause+
+                ' ORDER BY j.created_at DESC,j.job_id LIMIT ? OFFSET ?',(*params,limit,offset))]
         return dict(rows=rows,total=total,offset=offset,limit=limit)
 
     def clear_temporary_history(self):

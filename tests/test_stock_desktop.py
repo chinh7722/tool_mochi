@@ -72,5 +72,38 @@ class StockDesktopTests(unittest.TestCase):
             self.panel.table.cellWidget(0,8).click()
         self.assertEqual(self.window.send.call_args.args[:2],('stock.stop',{'ids':[7]}))
 
+    def test_inventory_opens_terminal_bean_job_and_creation_log(self):
+        self.result['rows'][0].update(last_job_id='stock-failed-job',batch_id='stock-batch')
+        self.panel.render(self.result)
+        from PySide6.QtWidgets import QPushButton
+        actions=self.panel.table.cellWidget(0,9).findChildren(QPushButton)
+        actions[0].click();self.assertEqual(self.window._log_job_id,'stock-failed-job')
+        actions[1].click();self.assertEqual(self.window._log_job_id,'stock-batch')
+
+    def test_running_search_filters_by_invite_job_and_owner_without_losing_records(self):
+        from copy import deepcopy
+        rows=[fixtures.job('first'),fixtures.job('second')]
+        rows[0].update(invite_code='INV42',creator_name='Đặng',creator_chat_id=555)
+        state=deepcopy(self.state);state['jobs']=rows;self.window.render({'state':state})
+        for query in ('inv42','FIRST','dang','555'):
+            self.window.job_search.setText(query)
+            self.assertEqual([r['job_id'] for r in self.window.jobs._rows],['first'])
+        self.window.job_search.clear();self.assertEqual(self.window.jobs.rowCount(),2)
+
+    def test_reopening_same_job_ignores_old_pending_log_response(self):
+        from types import SimpleNamespace
+        from gui.remote_window import RemoteMainWindow
+        w=self.window;w.client=Mock();w._connected=True;w._log_polling=False
+        w.poll_logs=RemoteMainWindow.poll_logs.__get__(w);w.log_picker.load=Mock()
+        callbacks=[]
+        w.task=Mock(side_effect=lambda factory,callback:callbacks.append(callback) or SimpleNamespace(finished=Mock()))
+        w.open_job_logs('same-job');old=callbacks[-1];w.open_job_logs('same-job')
+        old(dict(result=dict(lines=['stale delta'],cursor=50,epoch='old',reset=False)))
+        self.assertEqual(w.logs.toPlainText(),'');self.assertIsNone(w._log_cursor)
+        w._log_polling=False;w.poll_logs()
+        callbacks[-1](dict(result=dict(lines=['full saved log'],cursor=60,epoch='new',reset=True)))
+        self.assertEqual(w.logs.toPlainText(),'full saved log')
+        w.client=None
+
 
 if __name__=='__main__':unittest.main()

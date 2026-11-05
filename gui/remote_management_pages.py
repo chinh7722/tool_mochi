@@ -58,6 +58,14 @@ class TemporaryHistoryPanel(QWidget):
         self.row_buttons=[]
         from gui.remote_window import table
         box=QVBoxLayout(self)
+        self.search=QLineEdit();self.search.setMaxLength(160)
+        self.search.setPlaceholderText('Tìm theo mã mời, mã job, người tạo hoặc Chat ID…');box.addWidget(self.search)
+        from PySide6.QtCore import QTimer
+        self.search_timer=QTimer(self);self.search_timer.setSingleShot(True);self.search_timer.setInterval(250)
+        self.search_timer.timeout.connect(self.load);self.generation=0
+        def changed():
+            self.offset=0;self.generation+=1;self.search_timer.start()
+        self.search.textChanged.connect(changed)
         note=QLabel('Lịch sử hiển thị tạm của job đã kết thúc. Xóa ở đây chỉ ẩn các job hiện có; '
             'job kết thúc sau đó sẽ xuất hiện. Lịch sử Thống kê và log không bị xóa.');note.setWordWrap(True);box.addWidget(note)
         self.table=table(['Job','Người tạo','Mã mời','Trạng thái','Bean thực tế','Kết thúc','Thao tác'])
@@ -100,9 +108,10 @@ class TemporaryHistoryPanel(QWidget):
         w=self.window
         if not w.client or not w._connected or w._closing:return
         if self.busy:self.pending=True;return
-        self.busy=True;client=w.client
+        self.busy=True;client=w.client;generation=self.generation
+        payload=dict(offset=self.offset,query=self.search.text())
         def display(response):
-            if client is not w.client:return
+            if client is not w.client or generation!=self.generation:return
             from gui.remote_window import fill
             from gui.remote_workspace import format_time
             result=response['result'];self.total=result['total']
@@ -125,7 +134,7 @@ class TemporaryHistoryPanel(QWidget):
             self.set_enabled(w._connected and not w._mutating and not w._closing)
             self.status.setText(f'{min(self.offset+1,self.total)}–{min(self.offset+100,self.total)} / {self.total} job tạm')
             if self.offset and not rows:self.offset=max(0,self.offset-100);self.pending=True
-        worker=w.task(lambda:client.command('history.temporary',dict(offset=self.offset)),display)
+        worker=w.task(lambda:client.command('history.temporary',payload),display)
         def done():
             self.busy=False
             if self.pending:self.pending=False;self.load()

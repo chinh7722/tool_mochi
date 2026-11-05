@@ -15,10 +15,10 @@ import webbrowser
 from core.remote.client import RemoteClient
 from core.remote.protocol import MAX_BODY, RemoteError, encode
 
-READ_COMMANDS = frozenset(('job.logs','statistics.get','history.temporary','stock.list','stock.export.get','stock.exports',
+READ_COMMANDS = frozenset(('job.logs','job.search','statistics.get','history.temporary','stock.list','stock.export.get','stock.exports',
     'user.jobs','customer.history','finance.ledger','batch.list','history.export','proxy.export'))
 
-COMMANDS = frozenset(('job.create', 'job.stop', 'job.continue', 'job.logs', 'statistics.get', 'proxy.import', 'proxy.check',
+COMMANDS = frozenset(('job.create', 'job.stop', 'job.continue', 'job.logs', 'job.search', 'statistics.get', 'proxy.import', 'proxy.check',
     'pricing.save','history.temporary','history.temporary.clear',
     'stock.create','stock.list','stock.stop','stock.resume','stock.delete','stock.retry',
     'stock.export.prepare','stock.export.get','stock.export.finish','stock.exports',

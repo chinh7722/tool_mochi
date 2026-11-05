@@ -54,6 +54,7 @@ class Runtime:
     def state(self):
         m, t = self.mochi, self.telegram
         jobs = []
+        owners={u.chat_id:u.name for u in t.store.list_users(include_local=True)}
         with t.store._connection() as db:
             continued = {r[0] for r in db.execute('SELECT source_id FROM job_continuations')}
         for record in list(m._session_jobs.values())[-500:]:
@@ -64,6 +65,8 @@ class Runtime:
             jobs[-1]['can_continue'] = (record.is_terminal and record.success_count < record.target_count
                 and record.job_id not in m._workers and record.job_id not in continued
                 and not getattr(record,'stock_account_id',None))
+            if getattr(record,'stock_account_id',None):
+                jobs[-1]['creator_name']=owners.get(record.creator_chat_id or -1,record.creator_name)
         def proxies(page):
             rows = []
             for item in list(page._proxies.values())[:2000]:
@@ -115,7 +118,7 @@ class Runtime:
         if self.closing:
             raise RemoteError('VPS đang dừng dịch vụ; không nhận lệnh mới.')
         actions = {name: getattr(self, 'do_' + name.replace('.', '_')) for name in (
-            'job.create', 'job.stop', 'job.continue', 'job.logs', 'statistics.get', 'proxy.import', 'proxy.check', 'proxy.rotate',
+            'job.create', 'job.stop', 'job.continue', 'job.logs', 'job.search', 'statistics.get', 'proxy.import', 'proxy.check', 'proxy.rotate',
             'pricing.save','history.temporary','history.temporary.clear',
             'stock.create','stock.list','stock.stop','stock.resume','stock.delete','stock.retry',
             'stock.export.prepare','stock.export.get','stock.export.finish','stock.exports',
@@ -208,7 +211,10 @@ class Runtime:
         return dict(prices=prices,message='Đã lưu bảng giá; áp dụng theo tỷ lệ cho job tạo mới.')
 
     def do_history_temporary(self,data):
-        return self.telegram.store.temporary_history(offset=data.get('offset',0),limit=data.get('limit',100))
+        return self.telegram.store.temporary_history(offset=data.get('offset',0),limit=data.get('limit',100),query=data.get('query',''))
+
+    def do_job_search(self,data):
+        return self.telegram.store.search_jobs(data.get('query',''),offset=data.get('offset',0),limit=data.get('limit',100))
 
     def do_history_temporary_clear(self,data):
         return self.telegram.store.clear_temporary_history()

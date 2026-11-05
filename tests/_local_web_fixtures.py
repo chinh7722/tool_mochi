@@ -114,7 +114,12 @@ class FakeVPS:
                 users=[dict(**o,jobs=1,revenue_units=300000,cost_units=20000,profit_units=280000,pending_jobs=0) for o in owners],
                 history=rows,customer_history=rows,total=len(rows),customer_total=len(rows),note='Offline statistics fixture',
                 code_history=[dict(day=month+'-04',code='ONECODE',runs=2,owners=owners)],code_total=1)
-        elif action=='history.temporary':result=dict(rows=deepcopy(self.temporary_rows),total=len(self.temporary_rows))
+        elif action in ('history.temporary','job.search'):
+            from core.job_search import matches_job
+            rows=deepcopy(self.temporary_rows) if action=='history.temporary' else [dict(job_id=r['job_id'],
+                code=r['invite_code'],name=r['creator_name'],chat_id=r.get('creator_chat_id') or -1,status=r['status']) for r in self.value['jobs']]+deepcopy(self.temporary_rows)
+            rows=[r for r in rows if matches_job(r,payload.get('query',''))];offset=payload.get('offset',0)
+            result=dict(rows=rows[offset:offset+100],total=len(rows))
         elif action=='history.temporary.clear':self.temporary_rows=[]
         elif action=='pricing.save':
             self.value['settings']['prices']=deepcopy(payload['prices'])

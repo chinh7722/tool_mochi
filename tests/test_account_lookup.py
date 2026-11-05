@@ -231,6 +231,14 @@ class FetcherReadTests(unittest.IsolatedAsyncioTestCase):
 
 
 class LookupTests(unittest.IsolatedAsyncioTestCase):
+    async def test_known_login_code_is_visible_without_echoing_secret_error_payload(self):
+        for code in ('TLS_CERTIFICATE_ERROR',{'unsafe':'object'}):
+            self.fake.login.return_value={'ok':False,'code':code,'error':'private-token https://secret.invalid'}
+            with self.assertRaises(AccountLookupError) as caught:await self.lookup()
+            text=str(caught.exception)
+            self.assertNotIn('private-token',text);self.assertNotIn('secret.invalid',text)
+            if isinstance(code,str):self.assertIn(code,text)
+
     async def asyncSetUp(self):
         self.fake=SimpleNamespace(login=AsyncMock(return_value={'ok':True,'token':'token-secret',
             'data':{'private':'password-secret'}}),get_own_user_me=AsyncMock(return_value={
